@@ -1,0 +1,54 @@
+#verbose level
+/vis/verbose errors
+
+# use this open statment to create an OpenGl view:
+/vis/open OGL 1200x728
+
+# draw geometry
+/vis/drawVolume worlds
+
+# specify view angle (polar coords)
+/vis/viewer/set/rotationStyle freeRotation
+#/vis/viewer/set/viewpointThetaPhi 0. 0. deg
+/vis/viewer/set/viewpointThetaPhi 30. 30. deg
+
+# specify zoom value
+/vis/viewer/zoom 1.0
+
+# insert axis
+#/vis/scene/add/axes 0 0 -.25 .5 m
+#/vis/scene/add/axes 0 0 0 .05625 m
+#/vis/scene/add/axes 0 0 -.25 .25 m
+
+# viewer line width
+/vis/viewer/set/lineWidth 1
+
+# draw smooth trajectories at end of event, showing trajectory points
+# blue: positive charge
+# red: negative charge
+# green: no charge  
+# yellow: vertixes, when a line ends and another one starts
+# as markers 2 pixels wide
+# color by the charge
+
+/vis/scene/add/trajectories smooth
+# /vis/modeling/trajectories/create/drawByCharge
+# /vis/modeling/trajectories/drawByCharge-0/default/setDrawStepPts true
+# /vis/modeling/trajectories/drawByCharge-0/default/setStepPtsSize 2
+
+/vis/modeling/trajectories/create/drawByParticleID
+/vis/modeling/trajectories/drawByParticleID-0/default/setDrawStepPts true
+/vis/modeling/trajectories/drawByParticleID-0/default/setStepPtsSize 2
+
+# Assign specific colors to particle types
+/vis/modeling/trajectories/drawByParticleID-0/set gamma cyan
+/vis/modeling/trajectories/drawByParticleID-0/set neutron green
+/vis/modeling/trajectories/drawByParticleID-0/set proton blue
+/vis/modeling/trajectories/drawByParticleID-0/set e- red
+/vis/modeling/trajectories/drawByParticleID-0/set e+ magenta
+
+# update to every event
+/vis/viewer/set/autoRefresh true
+
+# to superimpose all of the events from a given run:
+/vis/scene/endOfEventAction accumulate
