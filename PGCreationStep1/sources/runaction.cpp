@@ -1,7 +1,7 @@
 #include "runaction.h"
+#include "../../sharedFiles/shared_params.h"
 
-runaction::runaction():
-G4UserRunAction(){
+runaction::runaction(): G4UserRunAction() {
     auto analysisManager = G4AnalysisManager::Instance();
     #ifdef G4MULTITHREADED
         analysisManager->SetNtupleMerging(false);
@@ -9,23 +9,24 @@ G4UserRunAction(){
     analysisManager->SetDefaultFileType("root");
     analysisManager->SetVerboseLevel(1);
     
-    // Define the NTuple structure once at initialization
-    analysisManager->CreateNtuple("incident_analysis", "Scored Particles and AC logic");
-    analysisManager->CreateNtupleIColumn("eventid");
-    analysisManager->CreateNtupleIColumn("pdg");
-    analysisManager->CreateNtupleSColumn("process");
-    analysisManager->CreateNtupleDColumn("creation_energy");
-    analysisManager->CreateNtupleDColumn("global_time");
-    analysisManager->CreateNtupleDColumn("edep_cebr3");
-    analysisManager->CreateNtupleDColumn("edep_bgo1");
-    analysisManager->CreateNtupleDColumn("edep_bgo2");
-    analysisManager->CreateNtupleDColumn("edep_bgo3");
-    analysisManager->CreateNtupleDColumn("edep_bgo4");
-    analysisManager->CreateNtupleDColumn("edep_bgo5");
-    analysisManager->CreateNtupleDColumn("edep_bgo6");
-    analysisManager->CreateNtupleDColumn("edep_bgo7");
-    analysisManager->CreateNtupleDColumn("edep_bgo8");
-    analysisManager->CreateNtupleDColumn("first_bgo_time");
+    analysisManager->CreateNtuple("PhaseSpace", "Scored Particles on Outer Cylinder");
+    analysisManager->CreateNtupleIColumn("eventid");          // 0
+    analysisManager->CreateNtupleIColumn("pdg");              // 1
+    analysisManager->CreateNtupleDColumn("energy_MeV");       // 2
+    analysisManager->CreateNtupleDColumn("pos_x_cm");         // 3
+    analysisManager->CreateNtupleDColumn("pos_y_cm");         // 4
+    analysisManager->CreateNtupleDColumn("pos_z_cm");         // 5
+    analysisManager->CreateNtupleDColumn("mom_dir_x");        // 6
+    analysisManager->CreateNtupleDColumn("mom_dir_y");        // 7
+    analysisManager->CreateNtupleDColumn("mom_dir_z");        // 8
+    analysisManager->CreateNtupleDColumn("time_ns");          // 9
+    
+    // New parameters
+    analysisManager->CreateNtupleDColumn("creation_energy_MeV"); // 10
+    analysisManager->CreateNtupleSColumn("creation_process");    // 11
+    analysisManager->CreateNtupleSColumn("nuclear_reaction");    // 12
+    analysisManager->CreateNtupleIColumn("interaction_id");      // 13
+    
     analysisManager->FinishNtuple(0);
 }
 
@@ -37,7 +38,7 @@ G4Run* runaction::GenerateRun() {
 }
 void runaction::BeginOfRunAction(const G4Run* urun){   
     auto analysisManager = G4AnalysisManager::Instance();
-    G4String fileName = "results_run" + std::to_string(urun->GetRunID()) + ".root";
+    G4String fileName = SharedParams::dataPath + "results_run" + std::to_string(urun->GetRunID()) + ".root";
     analysisManager->OpenFile(fileName);
 }
 

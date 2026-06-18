@@ -38,6 +38,7 @@ G4double sigma = fwhm / 2.3548;
 G4double targetX = 0.0;
 G4double targetY = 0.0;
 G4double targetZ = 0.0;
+G4Double sourceTargetDistance = 10.0; // Distance from source to target in cm
 G4VPhysicalVolume* targetVol = G4PhysicalVolumeStore::GetInstance()->GetVolume("pOuterTarget");
 if (targetVol) {
     targetX = targetVol->GetTranslation().x();
@@ -48,7 +49,7 @@ if (targetVol) {
 G4SPSPosDistribution* posDist = uParticleGPS->GetCurrentSource()->GetPosDist();
 
 // Offset the source 10 cm upstream of the target's center along the Z-axis
-posDist->SetCentreCoords(G4ThreeVector(targetX, targetY, targetZ - 10.0 * cm));
+posDist->SetCentreCoords(G4ThreeVector(targetX, targetY, targetZ - sourceTargetDistance * cm));
 
 // Define the 2D distribution type
 posDist->SetPosDisType("Beam");

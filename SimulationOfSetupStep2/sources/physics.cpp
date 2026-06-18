@@ -21,32 +21,32 @@ G4VModularPhysicsList(){
     SetVerboseLevel(uVerbose);
 
     plEM = new G4EmStandardPhysics_option4(uVerbose);
-    plEMextra = new G4EmExtraPhysics(uVerbose);
+    // plEMextra = new G4EmExtraPhysics(uVerbose);
 
-    plDecay = new G4DecayPhysics(uVerbose);
-    plRadioactiveDecay = new G4RadioactiveDecayPhysics(uVerbose);
+    // plDecay = new G4DecayPhysics(uVerbose);
+    // plRadioactiveDecay = new G4RadioactiveDecayPhysics(uVerbose);
 
-    plHadronElastic = new G4HadronElasticPhysicsHP(uVerbose);
-    // plHadronInelastic = new G4HadronPhysicsQGSP_BIC_HP(uVerbose);
-    // Arguments: (Name, QuasiElastic, NeutronHP, FTFP)
-    plHadronInelastic = new G4HadronPhysicsINCLXX("hInelastic INCLXX", true, true, false);
+    // plHadronElastic = new G4HadronElasticPhysicsHP(uVerbose);
+    // // plHadronInelastic = new G4HadronPhysicsQGSP_BIC_HP(uVerbose);
+    // // Arguments: (Name, QuasiElastic, NeutronHP, FTFP)
+    // plHadronInelastic = new G4HadronPhysicsINCLXX("hInelastic INCLXX", true, true, false);
 
-    plStoppping = new G4StoppingPhysics(uVerbose);
+    // plStoppping = new G4StoppingPhysics(uVerbose);
 
-    plIonElastic = new G4IonElasticPhysics(uVerbose);
-    plIonInelastic = new G4IonPhysics(uVerbose);
+    // plIonElastic = new G4IonElasticPhysics(uVerbose);
+    // plIonInelastic = new G4IonPhysics(uVerbose);
 }
 
 physics::~physics() {
     delete plEM;
-    delete plEMextra;
-    delete plDecay;
-    delete plRadioactiveDecay;
-    delete plHadronElastic;
-    delete plHadronInelastic;
-    delete plStoppping;
-    delete plIonElastic;
-    delete plIonInelastic;
+    // delete plEMextra;
+    // delete plDecay;
+    // delete plRadioactiveDecay;
+    // delete plHadronElastic;
+    // delete plHadronInelastic;
+    // delete plStoppping;
+    // delete plIonElastic;
+    // delete plIonInelastic;
 }
 
 //===============================================================================================

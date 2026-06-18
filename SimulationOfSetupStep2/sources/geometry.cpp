@@ -1,58 +1,13 @@
-//===============================================================================================
-// User libraries
-//===============================================================================================
-
 #include "geometry.h"
-
-//===============================================================================================
-// De/constructor
-//===============================================================================================
+#include "../../sharedFiles/shared_materials.h"
+#include "../../sharedFiles/shared_params.h"
 
 geometry::geometry() {
-    //-------------------------------------------------
-    // Native NIST Materials
-    //-------------------------------------------------  
-    matVacuum   = G4NistManager::Instance()->FindOrBuildMaterial("G4_Galactic");
-    matAir      = G4NistManager::Instance()->FindOrBuildMaterial("G4_AIR");
-    matAl       = G4NistManager::Instance()->FindOrBuildMaterial("G4_Al");
-    matWater = G4NistManager::Instance()->FindOrBuildMaterial("G4_WATER");
-
-    //-------------------------------------------------
-    // Custom Materials
-    //-------------------------------------------------
-    
-    // Teflon
-    matTeflon = new G4Material("teflon", 2.2*g/cm3, 2);
-    matTeflon->AddElement(G4NistManager::Instance()->FindOrBuildElement("C"), 2);
-    matTeflon->AddElement(G4NistManager::Instance()->FindOrBuildElement("F"), 4);
-
-    // Tungsten
-    matTungsten = new G4Material("tungsten", 19.25*g/cm3, 1);
-    matTungsten->AddElement(G4NistManager::Instance()->FindOrBuildElement("W"), 1);
-
-    // CeBr3
-    matCeBr3 = new G4Material("CeBr3", 5.10*g/cm3, 2);
-    matCeBr3->AddElement(G4NistManager::Instance()->FindOrBuildElement("Ce"), 1);
-    matCeBr3->AddElement(G4NistManager::Instance()->FindOrBuildElement("Br"), 3);
-
-    // BGO
-    matBGO = new G4Material("BGO", 7.13*g/cm3, 3);
-    matBGO->AddElement(G4NistManager::Instance()->FindOrBuildElement("Bi"), 4);
-    matBGO->AddElement(G4NistManager::Instance()->FindOrBuildElement("Ge"), 3);
-    matBGO->AddElement(G4NistManager::Instance()->FindOrBuildElement("O"), 12);
-
-    //Polystyrene
-    matPolystyrene = new G4Material("polystyrene", 1.05*g/cm3, 2);
-    matPolystyrene->AddElement(G4NistManager::Instance()->FindOrBuildElement("C"), 8);
-    matPolystyrene->AddElement(G4NistManager::Instance()->FindOrBuildElement("H"), 8);
-    
-    // Calcium Oxide
-    matCaO = new G4Material("calcium_oxide", 1.22*g/cm3, 2);
-    matCaO->AddElement(G4NistManager::Instance()->FindOrBuildElement("Ca"), 1);
-    matCaO->AddElement(G4NistManager::Instance()->FindOrBuildElement("O"), 1);
-    
+    SharedMaterials::ConstructMaterials(
+        matVacuum, matAir, matAl, matTeflon, matTungsten, 
+        matCeBr3, matBGO, matPolystyrene, matCaO, matWater
+    );
 }
-
 geometry::~geometry() {    
     if (rotDetector) {
         delete rotDetector;
@@ -247,18 +202,18 @@ G4VPhysicalVolume* geometry::Construct(){
     new G4PVPlacement(nullptr, {0., 0., frontCoverZCenter}, lFrontAl, "pFrontAl", lDetectorAssembly, false, 0, true);
     
     //-------------------------------------------------
-    // 5. Tungsten Collimator
+    // 5. Tungsten Collimator (Commented out for future use)
     //-------------------------------------------------
+    /*
     G4double collX = 12.5 * cm;
     G4double collY = 9.0 * cm;
     G4double collZ = 7.0 * cm;
     G4double collGap = 12.0 * mm;
     
-    // The mother volume encapsulates the thickness (X), height (Y), and total width including the gap (Z).
     G4Box* sCollCase = new G4Box("sCollCase", collX / 2.0, collY / 2.0, (2.0 * collZ + collGap) / 2.0);
     G4LogicalVolume* lCollCase = new G4LogicalVolume(sCollCase, matVacuum, "lCollCase");
-    G4VisAttributes* vCollCase = new G4VisAttributes(false); // Change to this
-    visAttributes.push_back(vCollCase);                      // Add this
+    G4VisAttributes* vCollCase = new G4VisAttributes(false); 
+    visAttributes.push_back(vCollCase);                      
     lCollCase->SetVisAttributes(vCollCase);
 
     G4Box* sCollimator = new G4Box("sCollimator", collX / 2.0, collY / 2.0, collZ / 2.0);
@@ -269,76 +224,35 @@ G4VPhysicalVolume* geometry::Construct(){
     visAttributes.push_back(vCollimator);
     lCollimatorVol->SetVisAttributes(vCollimator);
 
-    // Place the tungsten blocks INSIDE lCollCase, separated along the Z-axis to form the slit.
     G4double collZOffset = (collGap / 2.0) + (collZ / 2.0);
     new G4PVPlacement(nullptr, {0.*cm, 0.*cm, -collZOffset}, lCollimatorVol, "pCollimatorLeft", lCollCase, false, nDetectors++, true);
     new G4PVPlacement(nullptr, {0.*cm, 0.*cm, collZOffset}, lCollimatorVol, "pCollimatorRight", lCollCase, false, nDetectors++, true);
-    
+    */
 
     //-------------------------------------------------
-    // 6. Target
+    // 6. Target (Aligned with Step 1 phase space source)
     //--------------------------------------------------
-    G4double targetZ = 36.4*mm;
-    G4double targetY = 125.4*mm;
-    G4double targetX = 80.0*mm;
+    G4Tubs* sOuterTarget = new G4Tubs("sOuterTarget", 0, SharedParams::targetRadius, SharedParams::targetHalfLength, 0.*deg, 360.*deg);
+    G4LogicalVolume* lOuterTarget = new G4LogicalVolume(sOuterTarget, matAl, "lOuterTarget");
     
-    G4double wallThickness = 1*mm;
-    
-    // Outer Target (Polystyrene shell)
-    G4Box* sOuterTarget = new G4Box("sOuterTarget", 0.5*targetX, 0.5*targetY, 0.5*targetZ);
-    G4LogicalVolume* lOuterTarget = new G4LogicalVolume(sOuterTarget, matPolystyrene, "lOuterTarget");
-    
-    // Inner Target (CaO core)
-    G4Box* sInnerTarget = new G4Box("sInnerTarget", 0.5*(targetX - 2*wallThickness), 0.5*(targetY - 2*wallThickness), 0.5*(targetZ - 2*wallThickness));
-    G4LogicalVolume* lInnerTarget = new G4LogicalVolume(sInnerTarget, matCaO, "lInnerTarget");
-    
-    // Visualization Attributes
-    G4VisAttributes* vInnerTarget = new G4VisAttributes(true, G4Colour(1.0, 0.0, 0.0, 1.0)); // Change to this
-    visAttributes.push_back(vInnerTarget);                                                   // Add this
-    lInnerTarget->SetVisAttributes(vInnerTarget);
-    
-    // Adjusted alpha channel to 0.3 for transparency
-    G4VisAttributes* vOuterTarget = new G4VisAttributes(true, G4Colour(0.0, 1.0, 0.0, 0.3)); 
-    vOuterTarget->SetForceSolid(true);
-    visAttributes.push_back(vOuterTarget);
-    lOuterTarget->SetVisAttributes(vOuterTarget);
-    
-    // 1. Place inner target INSIDE the outer target
-    new G4PVPlacement(nullptr, {0., 0., 0.*mm}, lInnerTarget, "pInnerTarget", lOuterTarget, false, 0, true);
-    
-    //-------------------------------------------------
-    // Global Centering and Placement Calculations (X-Axis)
-    //-------------------------------------------------
-    G4double gapTargetToColl = 12.2 * cm;
-    G4double gapCollToDetector = 9.5 * cm;
+    G4VisAttributes *vTarget = new G4VisAttributes(true, G4Colour(0.7, 0.7, 0.7, 1.0));
+    vTarget->SetForceSolid(true);
+    visAttributes.push_back(vTarget);
+    lOuterTarget->SetVisAttributes(vTarget);
 
-    G4double lenTargetX = targetX; 
-    G4double lenCollX = collX;     
-    G4double lenDetectorX = bgoFrontZ + (0.5 * lBGO); 
-
-    // Total length of the setup along X
-    G4double totalLengthX = lenTargetX + gapTargetToColl + lenCollX + gapCollToDetector + lenDetectorX;
-    G4double startX = -totalLengthX / 2.0;
-
-    // Calculate global X coordinates
-    G4double posX_Target = startX + (lenTargetX / 2.0);
-    G4double posX_Coll = (startX + lenTargetX) + gapTargetToColl + (lenCollX / 2.0);
-    G4double globalDetFrontX = (posX_Coll + lenCollX / 2.0) + gapCollToDetector;
-    G4double posX_Detector = globalDetFrontX + bgoFrontZ;
+    // Place Target at Origin
+    new G4PVPlacement(nullptr, {0., 0., 0.}, lOuterTarget, "pOuterTarget", lWorld, false, 0, true);
 
     //-------------------------------------------------
     // Final World Placements
     //-------------------------------------------------
+
+    // Place Detector Assembly (5 cm laterally from target edge)
+    // The target edge is at X = targetRadius.
+    G4double posX_Detector = SharedParams::targetRadius + SharedParams::detectorLateralDistance + bgoFrontZ;
     
-    // Place Target
-    new G4PVPlacement(nullptr, {posX_Target, 0., 0.}, lOuterTarget, "pOuterTarget", lWorld, false, 0, true);
-
-    // Place Collimator Mother Volume
-    new G4PVPlacement(nullptr, {posX_Coll, 0., 0.}, lCollCase, "pCollCase", lWorld, false, 0, true);
-
-    // Place Detector Assembly (Rotated -90 deg around Y to point face at the target)
     rotDetector = new G4RotationMatrix();
-    rotDetector->rotateY(+90. * deg);
+    rotDetector->rotateY(+90. * deg); // Face the detector towards origin along X-axis
     new G4PVPlacement(rotDetector, {posX_Detector, 0., 0.}, lDetectorAssembly, "pDetectorAssembly", lWorld, false, 0, true);
     
     return pWorld;

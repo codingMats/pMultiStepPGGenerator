@@ -1,31 +1,20 @@
 #pragma once
 
-//===============================================================================================
-// std libraries
-//===============================================================================================
-
-//===============================================================================================
-// geant libraries
-//===============================================================================================
-
 #include "G4VUserPrimaryGeneratorAction.hh"
-
 #include "G4ParticleGun.hh"
-#include "G4GeneralParticleSource.hh"
-#include "G4ParticleTable.hh"
-
+#include "G4Event.hh"
 #include "G4SystemOfUnits.hh"
-#include "G4PhysicalVolumeStore.hh"
-#include "G4VPhysicalVolume.hh"
+#include "G4ThreeVector.hh"
+#include "G4AutoLock.hh"
+#include <vector>
 
-//===============================================================================================
-// user libraries
-//===============================================================================================
-
-//===============================================================================================
-// Class Prototype
-//===============================================================================================
-
+struct PhaseSpaceParticle {
+    G4int pdg;
+    G4double energy;
+    G4ThreeVector position;
+    G4ThreeVector direction;
+    G4double time;
+};
 
 class generator : public G4VUserPrimaryGeneratorAction {    
     public:
@@ -39,7 +28,12 @@ class generator : public G4VUserPrimaryGeneratorAction {
         G4ThreeVector getIDirection() { return direction; }
 
     private:
-        G4GeneralParticleSource *uParticleGPS;
+        G4ParticleGun* uParticleGun;
         G4double energy = -1;
         G4ThreeVector position, direction;
+        uint64_t currentEntry;
+
+        // Static members shared across all threads
+        static std::vector<PhaseSpaceParticle>* sharedPhaseSpaceData;
+        static G4Mutex mutex;
 };

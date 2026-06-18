@@ -152,24 +152,20 @@ int main(int argc, char** argv) {
     delete visManager;
     if (uiExecutive) delete uiExecutive;
 
-    // 2. Automate the merging process
-    std::cout << "\nMerging chunked ROOT files..." << std::endl;
+    /// 2. Automate the merging process
+    std::cout << "\nMerging chunked ROOT files in data directory..." << std::endl;
     
-    // The -f flag forces an overwrite if merged_results.root already exists
-    int sysReturn = std::system("hadd -f merged_results.root results_run*.root");
+    std::string mergeCmd = "hadd -f " + SharedParams::dataPath + "merged_results.root " + SharedParams::dataPath + "results_run*.root";
+    int sysReturn = std::system(mergeCmd.c_str());
     
-    // Optional: Clean up the individual chunk files if the merge was successful
     if (sysReturn == 0) {
         std::cout << "Merge successful. Removing temporary chunk files..." << std::endl;
-        int status = std::system("rm results_run*.root");
-        if (status != 0) {
-            // Handle the failure (e.g., print a warning or exit)
-            std::cerr << "Warning: Failed to clear old ROOT files." << std::endl;
-}
+        std::string rmCmd = "rm " + SharedParams::dataPath + "results_run*.root";
+        int status = std::system(rmCmd.c_str());
+        if (status != 0) std::cerr << "Warning: Failed to clear old ROOT files." << std::endl;
     } else {
-        std::cerr << "Warning: 'hadd' merge failed. Check if ROOT is sourced in your environment." << std::endl;
+        std::cerr << "Warning: 'hadd' merge failed." << std::endl;
     }
-
     
 
     std::cout << "Press Enter to exit..." << std::endl;

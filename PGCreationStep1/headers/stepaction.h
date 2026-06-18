@@ -11,12 +11,15 @@
 #include "G4Gamma.hh"
 #include "G4Proton.hh"
 #include "G4LogicalVolume.hh"
+#include "G4HadronicProcess.hh"
+#include "G4Nucleus.hh"
 
 //===============================================================================================
 // user libraries
 //===============================================================================================
 
 #include "eventaction.h"
+#include "trackinfo.h"
 
 //===============================================================================================
 // class prototype
@@ -33,7 +36,6 @@ class stepaction: public G4UserSteppingAction
     private:
         eventaction *ueventaction;
         
-        G4LogicalVolume* pDetectorAssembly;
         G4LogicalVolume* pOuterTarget;
         G4LogicalVolume* pWorld;
         bool pointersInitialized;
