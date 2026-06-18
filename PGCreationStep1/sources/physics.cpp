@@ -27,9 +27,9 @@ G4VModularPhysicsList(){
     plRadioactiveDecay = new G4RadioactiveDecayPhysics(uVerbose);
 
     plHadronElastic = new G4HadronElasticPhysicsHP(uVerbose);
-    // plHadronInelastic = new G4HadronPhysicsQGSP_BIC_HP(uVerbose);
+    plHadronInelastic = new G4HadronPhysicsQGSP_BIC_HP(uVerbose);
     // Arguments: (Name, QuasiElastic, NeutronHP, FTFP)
-    plHadronInelastic = new G4HadronPhysicsINCLXX("hInelastic INCLXX", true, true, false);
+    // plHadronInelastic = new G4HadronPhysicsINCLXX("hInelastic INCLXX", true, true, false);
 
     plStoppping = new G4StoppingPhysics(uVerbose);
 
