@@ -1,7 +1,7 @@
 #include "runaction.h"
 #include "../../sharedFiles/shared_params.h"
 
-runaction::runaction(): G4UserRunAction() {
+runaction::runaction(G4String material, G4String step) : G4UserRunAction(), uMaterial(material), uStep(step) {
     auto analysisManager = G4AnalysisManager::Instance();
     #ifdef G4MULTITHREADED
         analysisManager->SetNtupleMerging(false);
@@ -24,8 +24,9 @@ runaction::runaction(): G4UserRunAction() {
     // New parameters
     analysisManager->CreateNtupleDColumn("creation_energy_MeV"); // 10
     analysisManager->CreateNtupleSColumn("creation_process");    // 11
-    analysisManager->CreateNtupleSColumn("nuclear_reaction");    // 12
-    analysisManager->CreateNtupleIColumn("interaction_id");      // 13
+    analysisManager->CreateNtupleIColumn("target_Z");            // 12
+    analysisManager->CreateNtupleIColumn("target_A");            // 13
+    analysisManager->CreateNtupleIColumn("interaction_id");      // 14
     
     analysisManager->FinishNtuple(0);
 }
@@ -38,7 +39,7 @@ G4Run* runaction::GenerateRun() {
 }
 void runaction::BeginOfRunAction(const G4Run* urun){   
     auto analysisManager = G4AnalysisManager::Instance();
-    G4String fileName = SharedParams::dataPath + "results_run" + std::to_string(urun->GetRunID()) + ".root";
+    G4String fileName = SharedParams::dataPath + uStep + "_" + uMaterial + "_run" + std::to_string(urun->GetRunID()) + ".root";
     analysisManager->OpenFile(fileName);
 }
 

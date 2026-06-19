@@ -7,6 +7,8 @@
 #include "G4ThreeVector.hh"
 #include "G4AutoLock.hh"
 #include <vector>
+#include <memory>
+#include <atomic>
 
 struct PhaseSpaceParticle {
     G4int pdg;
@@ -18,7 +20,7 @@ struct PhaseSpaceParticle {
 
 class generator : public G4VUserPrimaryGeneratorAction {    
     public:
-        generator();
+        generator(G4String materialName);
         virtual ~generator() override;
 
         virtual void GeneratePrimaries(G4Event* anEvent) override;
@@ -31,9 +33,9 @@ class generator : public G4VUserPrimaryGeneratorAction {
         G4ParticleGun* uParticleGun;
         G4double energy = -1;
         G4ThreeVector position, direction;
-        uint64_t currentEntry;
 
         // Static members shared across all threads
-        static std::vector<PhaseSpaceParticle>* sharedPhaseSpaceData;
         static G4Mutex mutex;
+        static std::shared_ptr<std::vector<PhaseSpaceParticle>> sharedPhaseSpaceData;
+        static std::atomic<uint64_t> globalAtomicIndex;
 };

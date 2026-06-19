@@ -61,41 +61,37 @@ void stepaction::UserSteppingAction(const G4Step *uStep){
     auto preTouchable = preStepPoint->GetTouchable();
     for (G4int i = 0; i <= preTouchable->GetHistoryDepth(); ++i) {
         if (preTouchable->GetVolume(i)->GetLogicalVolume() == pDetectorAssembly) {
-            preInDetector = true;
-            break;
+            preInDetector = true; break;
         }
     }
 
     auto postTouchable = postStepPoint->GetTouchable();
     for (G4int i = 0; i <= postTouchable->GetHistoryDepth(); ++i) {
         if (postTouchable->GetVolume(i)->GetLogicalVolume() == pDetectorAssembly) {
-            postInDetector = true;
-            break;
+            postInDetector = true; break;
         }
     }
 
     if (postInDetector && !preInDetector) {
         if (!ueventaction->HasIncidentMap(trackID)) {
             G4String procName = track->GetCreatorProcess() ? track->GetCreatorProcess()->GetProcessName() : "Primary";
-            
             ueventaction->AddIncidentParticle(
-                trackID, 
-                track->GetDefinition()->GetPDGEncoding(), 
-                procName, 
-                track->GetKineticEnergy() / MeV,
-                track->GetGlobalTime() / ns
+                trackID, track->GetDefinition()->GetPDGEncoding(), procName, 
+                track->GetKineticEnergy() / MeV, track->GetGlobalTime() / ns
             );
         }
     }
+
     // ----------------------------------------------------------------
-    // 3. Secondary Inheritance Mapping
+    // 3. Secondary Inheritance Mapping (At Birth)
     // ----------------------------------------------------------------
-    G4int parentID = track->GetParentID();
-    
-    // If this is a secondary track and it isn't in our map yet, 
-    // inherit the root incident ID from its parent.
-    if (parentID > 0 && !ueventaction->HasIncidentMap(trackID)) {
-        ueventaction->LinkSecondary(parentID, trackID);
+    if (ueventaction->HasIncidentMap(trackID)) {
+        const std::vector<const G4Track*>* secondaries = uStep->GetSecondaryInCurrentStep();
+        if (secondaries) {
+            for (auto sec : *secondaries) {
+                ueventaction->LinkSecondary(trackID, sec->GetTrackID());
+            }
+        }
     }
 
     // ----------------------------------------------------------------

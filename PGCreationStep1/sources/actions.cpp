@@ -1,43 +1,24 @@
-
-//===============================================================================================
-// std libraries
-//===============================================================================================
-
-//===============================================================================================
-// geant libraries
-//===============================================================================================
-
-//===============================================================================================
-// user libraries
-//===============================================================================================
-
 #include "actions.h"
 
-//===============================================================================================
-// build simulation for the master thread
-//===============================================================================================
+actions::actions(G4String material, G4String step) : uMaterial(material), uStep(step) {}
 
 void actions::BuildForMaster() const{
-    runaction *uRunAction = new runaction();
+    runaction *uRunAction = new runaction(uMaterial, uStep);
     SetUserAction(uRunAction);
 }
 
-//===============================================================================================
-// build simulation for general threads
-//===============================================================================================
+void actions::Build() const {        
+    // Step 1 Generator takes no arguments
+    generator   *uGenerator     = new generator(); 
 
-void actions::Build() const
-{        
-    generator   *uGenerator     = new generator();
-    runaction   *uRunAction     = new runaction();
+    runaction   *uRunAction     = new runaction(uMaterial, uStep);
     eventaction *uEventAction   = new eventaction(uRunAction, uGenerator);
     stepaction  *uStepAction    = new stepaction(uEventAction);
     stackaction *uStackAction   = new stackaction();
 
-    SetUserAction(uGenerator);
+    SetUserAction(uGenerator); 
     SetUserAction(uRunAction);
-    SetUserAction(uEventAction);
-    SetUserAction(uStepAction);
+    SetUserAction(uEventAction); 
+    SetUserAction(uStepAction); 
     SetUserAction(uStackAction);
 }
-

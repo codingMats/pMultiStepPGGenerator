@@ -2,27 +2,28 @@
 #include "../../sharedFiles/shared_params.h"
 #include "G4ParticleTable.hh"
 #include "G4ParticleDefinition.hh"
-#include "Randomize.hh"
 #include "G4AnalysisReader.hh"
+#include "G4RunManager.hh" // ADD THIS LINE
 
-// Initialize the static members
-std::vector<PhaseSpaceParticle>* generator::sharedPhaseSpaceData = nullptr;
+// Initialize static members
+std::shared_ptr<std::vector<PhaseSpaceParticle>> generator::sharedPhaseSpaceData = nullptr;
+std::atomic<uint64_t> generator::globalAtomicIndex{0};
 G4Mutex generator::mutex = G4MUTEX_INITIALIZER;
 
-generator::generator(): G4VUserPrimaryGeneratorAction() {        
+generator::generator(G4String materialName): G4VUserPrimaryGeneratorAction() {        
     uParticleGun = new G4ParticleGun(1);
     
-    // Lock the thread to ensure only the first thread reads the file
     G4AutoLock lock(&mutex);
     
     if (sharedPhaseSpaceData == nullptr) {
-        sharedPhaseSpaceData = new std::vector<PhaseSpaceParticle>();
+        sharedPhaseSpaceData = std::make_shared<std::vector<PhaseSpaceParticle>>();
         
         auto analysisReader = G4AnalysisReader::Instance();
-        G4String psFilePath = SharedParams::dataPath + "merged_results.root";
+        G4String psFilePath = SharedParams::dataPath + "PhaseSpace_" + materialName + ".root";
         analysisReader->SetFileName(psFilePath);
         
         G4int ntupleId = analysisReader->GetNtuple("PhaseSpace");
+        // ... (Keep the rest of your Tree-reading logic exactly as it is) ...
         
         if (ntupleId >= 0) {
             G4int eventid, pdg;
@@ -52,38 +53,29 @@ generator::generator(): G4VUserPrimaryGeneratorAction() {
             G4Exception("generator::generator()", "TreeError", FatalException, "PhaseSpace tree not found.");
         }
     }
-    
-    lock.unlock(); // Release the lock so other threads can proceed
-
-    // Offset thread start to avoid identical sequence overlapping
-    currentEntry = (sharedPhaseSpaceData->size() > 0) ? (uint64_t)(G4UniformRand() * sharedPhaseSpaceData->size()) : 0;
+    lock.unlock();
 }
 
 generator::~generator() {
     delete uParticleGun;
-    
-    // Memory cleanup: only the last thread to finish should delete the shared data
-    G4AutoLock lock(&mutex);
-    if (sharedPhaseSpaceData != nullptr) {
-        // In a strict MT environment, you might let the OS reclaim this at process exit,
-        // or use an atomic counter. For simplicity, leaving it allocated until program exit is standard.
-    }
-    lock.unlock();
+    // sharedPhaseSpaceData automatically cleans up when the last thread instance is destroyed.
 }
 
 void generator::GeneratePrimaries(G4Event* anEvent) {
-    if (sharedPhaseSpaceData->empty()) return;
+    if (!sharedPhaseSpaceData || sharedPhaseSpaceData->empty()) return;
 
-    if (currentEntry >= sharedPhaseSpaceData->size()) {
-        currentEntry = 0; 
+    // Fetch next index atomically and increment
+    uint64_t myIndex = globalAtomicIndex.fetch_add(1, std::memory_order_relaxed);
+
+    if (myIndex >= sharedPhaseSpaceData->size()) {
+        G4RunManager::GetRunManager()->AbortRun();
+        return;
     }
 
-    const PhaseSpaceParticle& p = (*sharedPhaseSpaceData)[currentEntry++];
+    const PhaseSpaceParticle& p = (*sharedPhaseSpaceData)[myIndex];
 
     G4ParticleDefinition* particle = G4ParticleTable::GetParticleTable()->FindParticle(p.pdg);
-    if (!particle) {
-        particle = G4ParticleTable::GetParticleTable()->FindParticle("gamma");
-    }
+    if (!particle) particle = G4ParticleTable::GetParticleTable()->FindParticle("gamma");
 
     uParticleGun->SetParticleDefinition(particle);
     uParticleGun->SetParticleEnergy(p.energy * MeV);

@@ -1,20 +1,19 @@
 #pragma once
-
 #include "G4VUserTrackInformation.hh"
-#include "G4String.hh"
 
 class trackinfo : public G4VUserTrackInformation {
     public:
-        trackinfo(const G4String& reaction, G4int intID)
-            : originReaction(reaction), interactionID(intID) {}
+        trackinfo(G4int tz, G4int ta, G4int intID)
+            : targetZ(tz), targetA(ta), interactionID(intID) {}
         virtual ~trackinfo() override {}
-
         virtual void Print() const override {}
 
-        G4String GetOriginReaction() const { return originReaction; }
+        G4int GetTargetZ() const { return targetZ; }
+        G4int GetTargetA() const { return targetA; }
         G4int GetInteractionID() const { return interactionID; }
 
     private:
-        G4String originReaction;
+        G4int targetZ;
+        G4int targetA;
         G4int interactionID;
 };

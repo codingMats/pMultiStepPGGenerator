@@ -8,11 +8,8 @@
 //===============================================================================================
 // De/constructor
 //===============================================================================================
-geometry::geometry() {
-    SharedMaterials::ConstructMaterials(
-        matVacuum, matAir, matAl, matTeflon, matTungsten, 
-        matCeBr3, matBGO, matPolystyrene, matCaO, matWater
-    );
+geometry::geometry(G4String targetMatName) : uTargetMatName(targetMatName) {
+    // Topas materials loaded automatically via main
 }
 
 geometry::~geometry() {    
@@ -39,8 +36,10 @@ G4VPhysicalVolume* geometry::Construct() {
     lWorld = new G4LogicalVolume(sWorld, matVacuum, "lWorld");
     G4VPhysicalVolume* pWorld = new G4PVPlacement(nullptr, {0, 0, 0}, lWorld, "pWorld", 0, false, 0, true);
 
+    G4Material* targetMaterial = SharedMaterials::GetTargetMaterial(uTargetMatName);
+
     G4Tubs* sTarget = new G4Tubs("sTarget", 0, SharedParams::targetRadius, SharedParams::targetHalfLength, 0.*deg, 360.*deg);
-    G4LogicalVolume* lTarget = new G4LogicalVolume(sTarget, matAl, "lTarget");
+    G4LogicalVolume* lTarget = new G4LogicalVolume(sTarget, targetMaterial, "lTarget");
     
     G4VisAttributes *vTarget = new G4VisAttributes(true, G4Colour(0.7, 0.7, 0.7, 1.0));
     vTarget->SetForceSolid(true);

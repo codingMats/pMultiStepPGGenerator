@@ -2,11 +2,8 @@
 #include "../../sharedFiles/shared_materials.h"
 #include "../../sharedFiles/shared_params.h"
 
-geometry::geometry() {
-    SharedMaterials::ConstructMaterials(
-        matVacuum, matAir, matAl, matTeflon, matTungsten, 
-        matCeBr3, matBGO, matPolystyrene, matCaO, matWater
-    );
+geometry::geometry(G4String targetMatName) : uTargetMatName(targetMatName) {
+    // Topas materials loaded automatically via main
 }
 geometry::~geometry() {    
     if (rotDetector) {
@@ -232,8 +229,10 @@ G4VPhysicalVolume* geometry::Construct(){
     //-------------------------------------------------
     // 6. Target (Aligned with Step 1 phase space source)
     //--------------------------------------------------
+    G4Material* targetMaterial = SharedMaterials::GetTargetMaterial(uTargetMatName);
+
     G4Tubs* sOuterTarget = new G4Tubs("sOuterTarget", 0, SharedParams::targetRadius, SharedParams::targetHalfLength, 0.*deg, 360.*deg);
-    G4LogicalVolume* lOuterTarget = new G4LogicalVolume(sOuterTarget, matAl, "lOuterTarget");
+    G4LogicalVolume* lOuterTarget = new G4LogicalVolume(sOuterTarget, targetMaterial, "lOuterTarget");
     
     G4VisAttributes *vTarget = new G4VisAttributes(true, G4Colour(0.7, 0.7, 0.7, 1.0));
     vTarget->SetForceSolid(true);
