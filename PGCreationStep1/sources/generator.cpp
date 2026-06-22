@@ -31,7 +31,8 @@ G4VUserPrimaryGeneratorAction() {
 
     // 3. Beam Position & Spatial Distribution
 // 3. Beam Position & Spatial Distribution
-G4double fwhm = 15.9 * mm;
+// G4double fwhm = 15.9 * mm;
+G4double fwhm = 1.59 * mm;
 G4double sigma = fwhm / 2.3548; 
 
 // Dynamically retrieve target position

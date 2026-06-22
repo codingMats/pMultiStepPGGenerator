@@ -109,7 +109,7 @@ int main(int argc, char** argv) {
     // DYNAMIC MERGING
     std::cout << "\nMerging chunked ROOT files in data directory..." << std::endl;
     std::string baseName = stepName + "_" + targetMaterial;
-    std::string mergeCmd = "hadd -f " + SharedParams::dataPath + baseName + ".root " + SharedParams::dataPath + baseName + "_run*.root";
+    std::string mergeCmd = "hadd -f " + SharedParams::dataPath + baseName + ".root " + SharedParams::dataPath+ baseName + "_run*.root";
     if (std::system(mergeCmd.c_str()) == 0) {
         std::cout << "Merge successful. Removing temporary files..." << std::endl;
         int rmStatus = std::system(("rm " + SharedParams::dataPath + baseName + "_run*.root").c_str());

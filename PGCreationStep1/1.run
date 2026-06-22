@@ -1,8 +1,8 @@
 (
  cd bin/
- #./simulation -ui 1 -macro ../macros/vis.mac
+ `./simulation -ui 1 -macro ../macros/vis.mac
  #./simulation -ui 1 -n 1 -macro ../macros/run.mac
  #./simulation -ui 2 -n 1 -macro ../macros/run.mac
- ./simulation -runs 1 -p 1000000 -n 0 -seed 52
+ #./simulation -runs 1 -p 1000000 -n 0 -seed 52
  #./simulation -runs 1 -p 1000000 -n 0 -seed 0
 )
