@@ -95,6 +95,7 @@ int main(int argc, char** argv) {
         if (sessionType == 2) {
             uiExecutive = new G4UIExecutive(argc, argv, "tcsh");
             if (!macroFile.empty()) uiManager->ApplyCommand("/control/execute " + macroFile);
+            uiExecutive->SessionStart();
         }
         const uint64_t MAX_PER_RUN = 1000000000ULL;
         for (size_t irun = 0; irun < nRuns; ++irun) {
@@ -114,13 +115,14 @@ int main(int argc, char** argv) {
 
     delete runManager; delete visManager; if (uiExecutive) delete uiExecutive;
 
-    // Dynamic merging
+    // DYNAMIC MERGING
     std::cout << "\nMerging chunked ROOT files in data directory..." << std::endl;
     std::string baseName = stepName + "_" + targetMaterial;
     std::string mergeCmd = "hadd -f " + SharedParams::dataPath + baseName + ".root " + SharedParams::dataPath + baseName + "_run*.root";
     if (std::system(mergeCmd.c_str()) == 0) {
         std::cout << "Merge successful. Removing temporary files..." << std::endl;
-        std::system(("rm " + SharedParams::dataPath + baseName + "_run*.root").c_str());
+        int rmStatus = std::system(("rm " + SharedParams::dataPath + baseName + "_run*.root").c_str());
+        (void)rmStatus; // Suppress the unused-result warning
     } else {
         std::cerr << "Warning: 'hadd' merge failed." << std::endl;
     }

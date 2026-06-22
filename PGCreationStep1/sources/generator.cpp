@@ -38,7 +38,7 @@ G4double sigma = fwhm / 2.3548;
 G4double targetX = 0.0;
 G4double targetY = 0.0;
 G4double targetZ = 0.0;
-G4Double sourceTargetDistance = 10.0; // Distance from source to target in cm
+G4double sourceTargetDistance = 10.0; // Distance from source to target in cm
 G4VPhysicalVolume* targetVol = G4PhysicalVolumeStore::GetInstance()->GetVolume("pOuterTarget");
 if (targetVol) {
     targetX = targetVol->GetTranslation().x();

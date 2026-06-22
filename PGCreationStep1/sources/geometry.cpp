@@ -9,9 +9,20 @@
 // De/constructor
 //===============================================================================================
 geometry::geometry(G4String targetMatName) : uTargetMatName(targetMatName) {
-    // Topas materials loaded automatically via main
+    G4NistManager* nist = G4NistManager::Instance();
+    matVacuum = nist->FindOrBuildMaterial("G4_Galactic");
+    matAir    = nist->FindOrBuildMaterial("G4_AIR");
+    matAl     = nist->FindOrBuildMaterial("G4_Al");
+    matWater  = nist->FindOrBuildMaterial("G4_WATER");
+    
+    // Fetch custom materials that were built by SharedMaterials::BuildAllMaterials()
+    matTeflon      = G4Material::GetMaterial("teflon");
+    matTungsten    = G4Material::GetMaterial("tungsten");
+    matCeBr3       = G4Material::GetMaterial("CeBr3");
+    matBGO         = G4Material::GetMaterial("BGO");
+    matPolystyrene = G4Material::GetMaterial("polystyrene");
+    matCaO         = G4Material::GetMaterial("calcium_oxide");
 }
-
 geometry::~geometry() {    
     if (rotDetector) {
         delete rotDetector;
