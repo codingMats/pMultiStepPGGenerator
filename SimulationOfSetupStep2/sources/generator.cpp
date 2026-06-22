@@ -2,7 +2,7 @@
 #include "../../sharedFiles/shared_params.h"
 #include "G4ParticleTable.hh"
 #include "G4ParticleDefinition.hh"
-#include "G4AnalysisReader.hh"
+#include "G4RootAnalysisReader.hh"
 #include "G4RunManager.hh" // ADD THIS LINE
 
 // Initialize static members
@@ -18,7 +18,7 @@ generator::generator(G4String materialName): G4VUserPrimaryGeneratorAction() {
     if (sharedPhaseSpaceData == nullptr) {
         sharedPhaseSpaceData = std::make_shared<std::vector<PhaseSpaceParticle>>();
         
-        auto analysisReader = G4AnalysisReader::Instance();
+        auto analysisReader = G4RootAnalysisReader::Instance();
         G4String psFilePath = SharedParams::dataPath + "PhaseSpace_" + materialName + ".root";
         analysisReader->SetFileName(psFilePath);
         

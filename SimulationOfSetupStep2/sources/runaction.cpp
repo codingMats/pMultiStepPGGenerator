@@ -1,5 +1,5 @@
 #include "runaction.h"
-
+#include "../../sharedFiles/shared_params.h"
 runaction::runaction(G4String material, G4String step) : G4UserRunAction(), uMaterial(material), uStep(step) {
     auto analysisManager = G4AnalysisManager::Instance();
     #ifdef G4MULTITHREADED
@@ -36,7 +36,7 @@ G4Run* runaction::GenerateRun() {
 }
 void runaction::BeginOfRunAction(const G4Run* urun){   
     auto analysisManager = G4AnalysisManager::Instance();
-    G4String fileName = SharedParams::dataPath + uStep + "_" + uMaterial + "_run" + std::to_string(urun->GetRunID()) + ".root";
+    G4String fileName = shared_params::dataPath + uStep + "_" + uMaterial + "_run" + std::to_string(urun->GetRunID()) + ".root";
     analysisManager->OpenFile(fileName);
 }
 void runaction::EndOfRunAction(const G4Run* urun){

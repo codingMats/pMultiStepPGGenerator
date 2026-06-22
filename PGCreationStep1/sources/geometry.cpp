@@ -39,7 +39,7 @@ geometry::~geometry() {
 //===============================================================================================
 
 G4VPhysicalVolume* geometry::Construct() {
-    G4double margin = 0.1 * mm;
+    G4double margin = 1.5 * cm;
     G4double worldRadius = SharedParams::targetRadius + margin;
     G4double worldHL = SharedParams::targetHalfLength + 5.0 * cm; 
 

@@ -4,6 +4,10 @@
 #include "G4EventManager.hh"
 #include "G4NistManager.hh"
 #include "G4Nucleus.hh"
+#include "G4HadronicProcess.hh"
+#include "G4AnalysisManager.hh"
+#include "trackinfo.h"
+#include "../../sharedFiles/shared_params.h"
 
 stepaction::stepaction(eventaction *eventaction): 
 G4UserSteppingAction(), ueventaction(eventaction), pOuterTarget(nullptr), pWorld(nullptr), pointersInitialized(false){}
@@ -75,6 +79,13 @@ void stepaction::UserSteppingAction(const G4Step *uStep){
 
     // This strictly captures particles the moment they cross the target's exterior boundary into the world.
     if (prePhys->GetLogicalVolume() == pOuterTarget && postPhys->GetLogicalVolume() == pWorld) {
+        G4double zLimit = SharedParams::targetHalfLength;
+        G4ThreeVector pos = postStepPoint->GetPosition();
+    
+        // If the absolute Z position is near the end caps, ignore it
+        if (std::abs(pos.z()) > (zLimit - 0.01 * mm)) {
+            return; // Exited through a cap, do not score
+        }
         G4int pdg = track->GetDefinition()->GetPDGEncoding();
         
         // Score protons (2212), neutrons (2112), gammas (22)
@@ -117,5 +128,6 @@ void stepaction::UserSteppingAction(const G4Step *uStep){
             
             analysisManager->AddNtupleRow(0);
         }
+        track->SetTrackStatus(fStopAndKill);
     }
 }

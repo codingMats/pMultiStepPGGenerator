@@ -55,6 +55,8 @@ set(PROJECT_SOURCEs_DIR ${PROJECT_SOURCE_DIR}/sources)
 
 file(GLOB_RECURSE sources ${PROJECT_SOURCEs_DIR}/*.cpp)
 file(GLOB_RECURSE headers ${PROJECT_INCLUDEs_DIR}/*.h)
+# /home/mats/projects/geant4/pMultiStepPGGenerator/sharedFiles
+file(GLOB_RECURSE shared_sources ${PROJECT_SOURCE_DIR}/sharedFiles/*.h)
 
 #----------------------------------------------------
 # Add the executable

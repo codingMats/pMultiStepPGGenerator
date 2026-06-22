@@ -5,7 +5,7 @@
 
 namespace SharedParams {
     // Target Geometry
-    constexpr G4double targetRadius = 1.25 * cm;
+    constexpr G4double targetRadius =  3.0 * cm;
     constexpr G4double targetHalfLength = 4.5 * mm;
     
     // Placement
