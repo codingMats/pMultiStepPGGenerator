@@ -9,7 +9,7 @@ namespace SharedParams {
     constexpr G4double targetHalfLength = 4.5 * mm;
     
     // Placement
-    constexpr G4double detectorLateralDistance = 5.0 * cm; 
+    constexpr G4double detectorLateralDistance = 17.5 * cm; 
 
     // Dynamic Path Resolution
     inline std::string getDynamicDataPath() {

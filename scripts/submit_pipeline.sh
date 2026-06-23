@@ -4,11 +4,11 @@
 MATERIALS=("WaterCa0" "Gammex_Cal_000" "Gammex_Cal_010" "Gammex_Cal_017" "Gammex_Cal_024" "Gammex_Cal_031" "Gammex_Cal_038" "Gammex_Cal_045")
 
 # Test with a single material
-MATERIALS=("WaterCa0") 
+# MATERIALS=("WaterCa0") 
 
 # 1e6 particles per run x 10 runs = 1e7 total particles
-HISTORIES_PER_RUN=100000
-HISTORIES_TOTAL=1000000
+HISTORIES_PER_RUN=10000000
+HISTORIES_TOTAL=1000000000
 NUM_RUNS=$((HISTORIES_TOTAL / HISTORIES_PER_RUN))
 
 # HISTORIES_PER_RUN=10000000
