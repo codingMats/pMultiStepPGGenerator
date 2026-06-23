@@ -8,6 +8,9 @@ start of File: ./sharedFiles/shared_materials.h
 namespace SharedMaterials {
 
     inline void BuildAllMaterials() {
+        static bool isBuilt = false;
+        if (isBuilt) return;
+        isBuilt = true;
         G4NistManager* nist = G4NistManager::Instance();
 
         // Elements
@@ -183,17 +186,36 @@ end of File: ./sharedFiles/shared_materials.h
 start of File: ./sharedFiles/shared_params.h
 #pragma once
 #include "G4SystemOfUnits.hh"
+#include <string>
+#include <unistd.h> // Required for getcwd()
 
 namespace SharedParams {
     // Target Geometry
-    constexpr G4double targetRadius = 1.25 * cm;
+    constexpr G4double targetRadius =  3.0 * cm;
     constexpr G4double targetHalfLength = 4.5 * mm;
     
     // Placement
     constexpr G4double detectorLateralDistance = 5.0 * cm; 
 
-    // File Paths
-    const std::string dataPath = "/omics/groups/OE0471/internal/m361e/master/pMultiStepPGGenerator/data/";
+    // Dynamic Path Resolution
+    inline std::string getDynamicDataPath() {
+        char cwd[1024];
+        if (getcwd(cwd, sizeof(cwd)) != nullptr) {
+            std::string path(cwd);
+            std::string target = "pMultiStepPGGenerator";
+            size_t pos = path.find(target);
+            
+            if (pos != std::string::npos) {
+                // Slice the path up to the end of the target folder name and append /data/
+                return path.substr(0, pos + target.length()) + "/data/";
+            }
+        }
+        // Fallback if the executable is run from completely outside the project tree
+        return "./data/"; 
+    }
+
+    // Initialize the path once at runtime
+    static const std::string dataPath = getDynamicDataPath();
 }
 end of File: ./sharedFiles/shared_params.h
 
@@ -282,6 +304,7 @@ int main(int argc, char** argv) {
         uiExecutive = new G4UIExecutive(argc, argv, "qt");
         if (!macroFile.empty()) uiManager->ApplyCommand("/control/execute " + macroFile);
         uiExecutive->SessionStart();
+        
     } else {
         if (sessionType == 2) {
             uiExecutive = new G4UIExecutive(argc, argv, "tcsh");
@@ -308,7 +331,7 @@ int main(int argc, char** argv) {
     // DYNAMIC MERGING
     std::cout << "\nMerging chunked ROOT files in data directory..." << std::endl;
     std::string baseName = stepName + "_" + targetMaterial;
-    std::string mergeCmd = "hadd -f " + SharedParams::dataPath + baseName + ".root " + SharedParams::dataPath + baseName + "_run*.root";
+    std::string mergeCmd = "hadd -f " + SharedParams::dataPath + baseName + ".root " + SharedParams::dataPath+ baseName + "_run*.root";
     if (std::system(mergeCmd.c_str()) == 0) {
         std::cout << "Merge successful. Removing temporary files..." << std::endl;
         int rmStatus = std::system(("rm " + SharedParams::dataPath + baseName + "_run*.root").c_str());
@@ -781,6 +804,10 @@ start of File: ./PGCreationStep1/sources/stepaction.cpp
 #include "G4EventManager.hh"
 #include "G4NistManager.hh"
 #include "G4Nucleus.hh"
+#include "G4HadronicProcess.hh"
+#include "G4AnalysisManager.hh"
+#include "trackinfo.h"
+#include "../../sharedFiles/shared_params.h"
 
 stepaction::stepaction(eventaction *eventaction): 
 G4UserSteppingAction(), ueventaction(eventaction), pOuterTarget(nullptr), pWorld(nullptr), pointersInitialized(false){}
@@ -852,6 +879,13 @@ void stepaction::UserSteppingAction(const G4Step *uStep){
 
     // This strictly captures particles the moment they cross the target's exterior boundary into the world.
     if (prePhys->GetLogicalVolume() == pOuterTarget && postPhys->GetLogicalVolume() == pWorld) {
+        G4double zLimit = SharedParams::targetHalfLength;
+        G4ThreeVector pos = postStepPoint->GetPosition();
+    
+        // If the absolute Z position is near the end caps, ignore it
+        if (std::abs(pos.z()) > (zLimit - 0.01 * mm)) {
+            return; // Exited through a cap, do not score
+        }
         G4int pdg = track->GetDefinition()->GetPDGEncoding();
         
         // Score protons (2212), neutrons (2112), gammas (22)
@@ -894,6 +928,7 @@ void stepaction::UserSteppingAction(const G4Step *uStep){
             
             analysisManager->AddNtupleRow(0);
         }
+        track->SetTrackStatus(fStopAndKill);
     }
 }
 end of File: ./PGCreationStep1/sources/stepaction.cpp
@@ -1023,6 +1058,10 @@ start of File: ./PGCreationStep1/sources/generator.cpp
 #include "generator.h"
 #include "G4PhysicalVolumeStore.hh"
 #include "G4VPhysicalVolume.hh"
+#include "G4SystemOfUnits.hh"
+#include "G4ParticleTable.hh"
+#include "G4GeneralParticleSource.hh"
+
 //===============================================================================================
 // de/constructor
 //===============================================================================================
@@ -1048,7 +1087,7 @@ G4double sigma = fwhm / 2.3548;
 G4double targetX = 0.0;
 G4double targetY = 0.0;
 G4double targetZ = 0.0;
-G4Double sourceTargetDistance = 10.0; // Distance from source to target in cm
+G4double sourceTargetDistance = 10.0; // Distance from source to target in cm
 G4VPhysicalVolume* targetVol = G4PhysicalVolumeStore::GetInstance()->GetVolume("pOuterTarget");
 if (targetVol) {
     targetX = targetVol->GetTranslation().x();
@@ -1457,7 +1496,7 @@ geometry::~geometry() {
 //===============================================================================================
 
 G4VPhysicalVolume* geometry::Construct() {
-    G4double margin = 0.1 * mm;
+    G4double margin = 1.5 * cm;
     G4double worldRadius = SharedParams::targetRadius + margin;
     G4double worldHL = SharedParams::targetHalfLength + 5.0 * cm; 
 
@@ -1569,8 +1608,8 @@ start of File: ./SimulationOfSetupStep2/main.cpp
 #include "geometry.h"
 #include "actions.h"
 #include "physics.h"
-#include "../../sharedFiles/shared_materials.h"
-#include "../../sharedFiles/shared_params.h"
+#include "../sharedFiles/shared_materials.h"
+#include "../sharedFiles/shared_params.h"
 
 //===============================================================================================
 // Main code
@@ -1640,6 +1679,7 @@ int main(int argc, char** argv) {
         if (sessionType == 2) {
             uiExecutive = new G4UIExecutive(argc, argv, "tcsh");
             if (!macroFile.empty()) uiManager->ApplyCommand("/control/execute " + macroFile);
+            uiExecutive->SessionStart();
         }
         const uint64_t MAX_PER_RUN = 1000000000ULL;
         for (size_t irun = 0; irun < nRuns; ++irun) {
@@ -1659,13 +1699,14 @@ int main(int argc, char** argv) {
 
     delete runManager; delete visManager; if (uiExecutive) delete uiExecutive;
 
-    // Dynamic merging
+    // DYNAMIC MERGING
     std::cout << "\nMerging chunked ROOT files in data directory..." << std::endl;
     std::string baseName = stepName + "_" + targetMaterial;
     std::string mergeCmd = "hadd -f " + SharedParams::dataPath + baseName + ".root " + SharedParams::dataPath + baseName + "_run*.root";
     if (std::system(mergeCmd.c_str()) == 0) {
         std::cout << "Merge successful. Removing temporary files..." << std::endl;
-        std::system(("rm " + SharedParams::dataPath + baseName + "_run*.root").c_str());
+        int rmStatus = std::system(("rm " + SharedParams::dataPath + baseName + "_run*.root").c_str());
+        (void)rmStatus; // Suppress the unused-result warning
     } else {
         std::cerr << "Warning: 'hadd' merge failed." << std::endl;
     }
@@ -2250,7 +2291,7 @@ end of File: ./SimulationOfSetupStep2/sources/run.cpp
 
 start of File: ./SimulationOfSetupStep2/sources/runaction.cpp
 #include "runaction.h"
-
+#include "../../sharedFiles/shared_params.h"
 runaction::runaction(G4String material, G4String step) : G4UserRunAction(), uMaterial(material), uStep(step) {
     auto analysisManager = G4AnalysisManager::Instance();
     #ifdef G4MULTITHREADED
@@ -2302,7 +2343,11 @@ start of File: ./SimulationOfSetupStep2/sources/actions.cpp
 
 actions::actions(G4String material, G4String step) : uMaterial(material), uStep(step) {}
 
-void actions::BuildForMaster() const{
+void actions::BuildForMaster() const {
+    // This forces the Master Thread to read the merged file (without appending _t0)
+    // and loads it into your static sharedPhaseSpaceData vector.
+    generator tempGen(uMaterial);
+
     runaction *uRunAction = new runaction(uMaterial, uStep);
     SetUserAction(uRunAction);
 }
@@ -2330,7 +2375,7 @@ start of File: ./SimulationOfSetupStep2/sources/generator.cpp
 #include "../../sharedFiles/shared_params.h"
 #include "G4ParticleTable.hh"
 #include "G4ParticleDefinition.hh"
-#include "G4AnalysisReader.hh"
+#include "G4RootAnalysisReader.hh"
 #include "G4RunManager.hh" // ADD THIS LINE
 
 // Initialize static members
@@ -2346,7 +2391,7 @@ generator::generator(G4String materialName): G4VUserPrimaryGeneratorAction() {
     if (sharedPhaseSpaceData == nullptr) {
         sharedPhaseSpaceData = std::make_shared<std::vector<PhaseSpaceParticle>>();
         
-        auto analysisReader = G4AnalysisReader::Instance();
+        auto analysisReader = G4RootAnalysisReader::Instance();
         G4String psFilePath = SharedParams::dataPath + "PhaseSpace_" + materialName + ".root";
         analysisReader->SetFileName(psFilePath);
         
@@ -2734,6 +2779,7 @@ start of File: ./SimulationOfSetupStep2/sources/geometry.cpp
 #include "geometry.h"
 #include "../../sharedFiles/shared_materials.h"
 #include "../../sharedFiles/shared_params.h"
+#include <algorithm>
 
 geometry::geometry(G4String targetMatName) : uTargetMatName(targetMatName) {
     G4NistManager* nist = G4NistManager::Instance();

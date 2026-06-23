@@ -2,7 +2,11 @@
 
 actions::actions(G4String material, G4String step) : uMaterial(material), uStep(step) {}
 
-void actions::BuildForMaster() const{
+void actions::BuildForMaster() const {
+    // This forces the Master Thread to read the merged file (without appending _t0)
+    // and loads it into your static sharedPhaseSpaceData vector.
+    generator tempGen(uMaterial);
+
     runaction *uRunAction = new runaction(uMaterial, uStep);
     SetUserAction(uRunAction);
 }

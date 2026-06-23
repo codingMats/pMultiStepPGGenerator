@@ -24,8 +24,8 @@
 #include "geometry.h"
 #include "actions.h"
 #include "physics.h"
-#include "../../sharedFiles/shared_materials.h"
-#include "../../sharedFiles/shared_params.h"
+#include "../sharedFiles/shared_materials.h"
+#include "../sharedFiles/shared_params.h"
 
 //===============================================================================================
 // Main code
