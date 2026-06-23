@@ -1,0 +1,15 @@
+Info in <hadd>: target file: /home/mats/projects/geant4/pMultiStepPGGenerator/data/materialPhaseSpaces/WaterCa0/PhaseSpace_WaterCa0.root
+Info in <hadd>: compression setting for all output: 101
+hadd Source file 1: /home/mats/projects/geant4/pMultiStepPGGenerator/data/materialPhaseSpaces/WaterCa0/tmp_multifiles/PhaseSpace_WaterCa0_run1.root
+hadd Source file 2: /home/mats/projects/geant4/pMultiStepPGGenerator/data/materialPhaseSpaces/WaterCa0/tmp_multifiles/PhaseSpace_WaterCa0_run10.root
+hadd Source file 3: /home/mats/projects/geant4/pMultiStepPGGenerator/data/materialPhaseSpaces/WaterCa0/tmp_multifiles/PhaseSpace_WaterCa0_run2.root
+hadd Source file 4: /home/mats/projects/geant4/pMultiStepPGGenerator/data/materialPhaseSpaces/WaterCa0/tmp_multifiles/PhaseSpace_WaterCa0_run3.root
+hadd Source file 5: /home/mats/projects/geant4/pMultiStepPGGenerator/data/materialPhaseSpaces/WaterCa0/tmp_multifiles/PhaseSpace_WaterCa0_run4.root
+hadd Source file 6: /home/mats/projects/geant4/pMultiStepPGGenerator/data/materialPhaseSpaces/WaterCa0/tmp_multifiles/PhaseSpace_WaterCa0_run5.root
+hadd Source file 7: /home/mats/projects/geant4/pMultiStepPGGenerator/data/materialPhaseSpaces/WaterCa0/tmp_multifiles/PhaseSpace_WaterCa0_run6.root
+hadd Source file 8: /home/mats/projects/geant4/pMultiStepPGGenerator/data/materialPhaseSpaces/WaterCa0/tmp_multifiles/PhaseSpace_WaterCa0_run7.root
+hadd Source file 9: /home/mats/projects/geant4/pMultiStepPGGenerator/data/materialPhaseSpaces/WaterCa0/tmp_multifiles/PhaseSpace_WaterCa0_run8.root
+hadd Source file 10: /home/mats/projects/geant4/pMultiStepPGGenerator/data/materialPhaseSpaces/WaterCa0/tmp_multifiles/PhaseSpace_WaterCa0_run9.root
+Warning in <hadd>: Sources and Target have different compression settings
+hadd merging will be slower
+hadd Target path: /home/mats/projects/geant4/pMultiStepPGGenerator/data/materialPhaseSpaces/WaterCa0/PhaseSpace_WaterCa0.root:/

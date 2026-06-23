@@ -9,7 +9,23 @@
                              WWW : http://geant4.org/
 **************************************************************
 
+Checking overlaps for volume pAir:0 (G4Tubs) ... OK! 
+Checking overlaps for volume pTeflon:0 (G4Tubs) ... OK! 
+Checking overlaps for volume pCeBr3:0 (G4Tubs) ... OK! 
+Checking overlaps for volume pAlCase:0 (G4Tubs) ... OK! 
+Checking overlaps for volume pBGO:1 (G4Tubs) ... OK! 
+Checking overlaps for volume pBGO:2 (G4Tubs) ... OK! 
+Checking overlaps for volume pBGO:3 (G4Tubs) ... OK! 
+Checking overlaps for volume pBGO:4 (G4Tubs) ... OK! 
+Checking overlaps for volume pBGO:5 (G4Tubs) ... OK! 
+Checking overlaps for volume pBGO:6 (G4Tubs) ... OK! 
+Checking overlaps for volume pBGO:7 (G4Tubs) ... OK! 
+Checking overlaps for volume pBGO:8 (G4Tubs) ... OK! 
+Checking overlaps for volume pOuterAl:0 (G4Tubs) ... OK! 
+Checking overlaps for volume pInnerAl:0 (G4Tubs) ... OK! 
+Checking overlaps for volume pFrontAl:0 (G4Tubs) ... OK! 
 Checking overlaps for volume pOuterTarget:0 (G4Tubs) ... OK! 
+Checking overlaps for volume pDetectorAssembly:0 (G4Tubs) ... OK! 
 Visualization Manager instantiating with verbosity "warnings (3)"...
 Visualization Manager initialising...
 Registering graphics systems...
@@ -75,16 +91,25 @@ End of Run User Vis Actions: none
 
 Some /vis commands (optionally) take a string to specify colour.
 "/vis/list" to see available colours.
-Starting run 5 with 100000 histories (seed: 633930574)
+Starting run 1 with 2000000000 histories (seed: 480529228)
 ... set ntuple merging row mode : row-wise - done
-... create file : /home/mats/projects/geant4/pMultiStepPGGenerator/data/materialPhaseSpaces/WaterCa0/tmp_multifiles/PhaseSpace_WaterCa0_run5.root - done
-... open analysis file : /home/mats/projects/geant4/pMultiStepPGGenerator/data/materialPhaseSpaces/WaterCa0/tmp_multifiles/PhaseSpace_WaterCa0_run5.root - done
-... open main analysis file : /home/mats/projects/geant4/pMultiStepPGGenerator/data/materialPhaseSpaces/WaterCa0/tmp_multifiles/PhaseSpace_WaterCa0_run5.root - done
+... create file : /home/mats/projects/geant4/pMultiStepPGGenerator/data/detectorSimulationOutput/WaterCa0/DetectorOutput_WaterCa0_run1.root - done
+... open analysis file : /home/mats/projects/geant4/pMultiStepPGGenerator/data/detectorSimulationOutput/WaterCa0/DetectorOutput_WaterCa0_run1.root - done
+... open main analysis file : /home/mats/projects/geant4/pMultiStepPGGenerator/data/detectorSimulationOutput/WaterCa0/DetectorOutput_WaterCa0_run1.root - done
 G4WT0 > ... set ntuple merging row mode : row-wise - done
+G4WT3 > ... set ntuple merging row mode : row-wise - done
+G4WT4 > ... set ntuple merging row mode : row-wise - done
+G4WT5 > ... set ntuple merging row mode : row-wise - done
+G4WT7 > ... set ntuple merging row mode : row-wise - done
+G4WT9 > ... set ntuple merging row mode : row-wise - done
+G4WT2 > ... set ntuple merging row mode : row-wise - done
+G4WT8 > ... set ntuple merging row mode : row-wise - done
+G4WT6 > ... set ntuple merging row mode : row-wise - done
+G4WT1 > ... set ntuple merging row mode : row-wise - done
 G4WT0 > event: 0
-... write file : /home/mats/projects/geant4/pMultiStepPGGenerator/data/materialPhaseSpaces/WaterCa0/tmp_multifiles/PhaseSpace_WaterCa0_run5.root - done
-... close file : /home/mats/projects/geant4/pMultiStepPGGenerator/data/materialPhaseSpaces/WaterCa0/tmp_multifiles/PhaseSpace_WaterCa0_run5.root - done
-elapsed time: 7 s
+... write file : /home/mats/projects/geant4/pMultiStepPGGenerator/data/detectorSimulationOutput/WaterCa0/DetectorOutput_WaterCa0_run1.root - done
+... close file : /home/mats/projects/geant4/pMultiStepPGGenerator/data/detectorSimulationOutput/WaterCa0/DetectorOutput_WaterCa0_run1.root - done
+elapsed time: 9 s
 Graphics systems deleted.
 Visualization Manager deleting...
 Simulation completed!

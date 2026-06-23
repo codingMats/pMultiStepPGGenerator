@@ -75,15 +75,15 @@ End of Run User Vis Actions: none
 
 Some /vis commands (optionally) take a string to specify colour.
 "/vis/list" to see available colours.
-Starting run 5 with 100000 histories (seed: 633930574)
+Starting run 8 with 100000 histories (seed: 827891682)
 ... set ntuple merging row mode : row-wise - done
-... create file : /home/mats/projects/geant4/pMultiStepPGGenerator/data/materialPhaseSpaces/WaterCa0/tmp_multifiles/PhaseSpace_WaterCa0_run5.root - done
-... open analysis file : /home/mats/projects/geant4/pMultiStepPGGenerator/data/materialPhaseSpaces/WaterCa0/tmp_multifiles/PhaseSpace_WaterCa0_run5.root - done
-... open main analysis file : /home/mats/projects/geant4/pMultiStepPGGenerator/data/materialPhaseSpaces/WaterCa0/tmp_multifiles/PhaseSpace_WaterCa0_run5.root - done
+... create file : /home/mats/projects/geant4/pMultiStepPGGenerator/data/materialPhaseSpaces/WaterCa0/tmp_multifiles/PhaseSpace_WaterCa0_run8.root - done
+... open analysis file : /home/mats/projects/geant4/pMultiStepPGGenerator/data/materialPhaseSpaces/WaterCa0/tmp_multifiles/PhaseSpace_WaterCa0_run8.root - done
+... open main analysis file : /home/mats/projects/geant4/pMultiStepPGGenerator/data/materialPhaseSpaces/WaterCa0/tmp_multifiles/PhaseSpace_WaterCa0_run8.root - done
 G4WT0 > ... set ntuple merging row mode : row-wise - done
 G4WT0 > event: 0
-... write file : /home/mats/projects/geant4/pMultiStepPGGenerator/data/materialPhaseSpaces/WaterCa0/tmp_multifiles/PhaseSpace_WaterCa0_run5.root - done
-... close file : /home/mats/projects/geant4/pMultiStepPGGenerator/data/materialPhaseSpaces/WaterCa0/tmp_multifiles/PhaseSpace_WaterCa0_run5.root - done
+... write file : /home/mats/projects/geant4/pMultiStepPGGenerator/data/materialPhaseSpaces/WaterCa0/tmp_multifiles/PhaseSpace_WaterCa0_run8.root - done
+... close file : /home/mats/projects/geant4/pMultiStepPGGenerator/data/materialPhaseSpaces/WaterCa0/tmp_multifiles/PhaseSpace_WaterCa0_run8.root - done
 elapsed time: 7 s
 Graphics systems deleted.
 Visualization Manager deleting...
