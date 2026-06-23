@@ -19,7 +19,7 @@ generator::generator(G4String materialName): G4VUserPrimaryGeneratorAction() {
         sharedPhaseSpaceData = std::make_shared<std::vector<PhaseSpaceParticle>>();
         
         auto analysisReader = G4RootAnalysisReader::Instance();
-        G4String psFilePath = SharedParams::dataPath + "PhaseSpace_" + materialName + ".root";
+        G4String psFilePath = SharedParams::dataPath + "materialPhaseSpaces/" + materialName + "/PhaseSpace_" + materialName + ".root";
         analysisReader->SetFileName(psFilePath);
         
         G4int ntupleId = analysisReader->GetNtuple("PhaseSpace");

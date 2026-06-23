@@ -39,7 +39,7 @@ G4Run* runaction::GenerateRun() {
 }
 void runaction::BeginOfRunAction(const G4Run* urun){   
     auto analysisManager = G4AnalysisManager::Instance();
-    G4String fileName = SharedParams::dataPath + uStep + "_" + uMaterial + "_run" + std::to_string(urun->GetRunID()) + ".root";
+    G4String fileName = SharedParams::dataPath + "materialPhaseSpaces/" + uMaterial + "/tmp_multifiles/PhaseSpace_" + uMaterial + "_run" + std::to_string(urun->GetRunID()) + ".root";
     analysisManager->OpenFile(fileName);
 }
 
