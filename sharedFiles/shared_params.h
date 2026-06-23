@@ -14,7 +14,13 @@ namespace SharedParams {
     // Dynamic Path Resolution
     inline std::string getDynamicDataPath() {
         // Hardcoded absolute path for the new simulation project directory
-        return "/omics/groups/OE0471/internal/m361e/master/qPaperSimulations/data/";
+        if (chdir("/omics/groups/OE0471/internal/m361e/master/qPaperSimulations/data/") != 0) {
+            return "/home/mats/projects/geant4/pMultiStepPGGenerator/data/";
+        }
+        else{
+
+            return "/omics/groups/OE0471/internal/m361e/master/qPaperSimulations/data/";
+        }
     }
 
     // Initialize the path once at runtime
