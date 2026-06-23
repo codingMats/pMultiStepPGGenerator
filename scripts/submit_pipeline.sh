@@ -2,6 +2,7 @@
 
 # Target materials
 MATERIALS=("WaterCa0" "Gammex_Cal_000" "Gammex_Cal_010" "Gammex_Cal_017" "Gammex_Cal_024" "Gammex_Cal_031" "Gammex_Cal_038" "Gammex_Cal_045")
+MATERIALS=("BR_12_breast" "CT_solid_water" "Solid_water_M457" "LV1_liver" "IB3_inner_bone" "B200_bone_mineral" "CB2_30_CaCO3" "CB2_50_CaCO3" "SB3_cortical_bone")
 
 # Test with a single material
 # MATERIALS=("WaterCa0") 

@@ -83,15 +83,14 @@ void stepaction::UserSteppingAction(const G4Step *uStep){
     }
 
     // ----------------------------------------------------------------
-    // 3. Secondary Inheritance Mapping (At Birth)
+    // 3. Secondary Inheritance Mapping
     // ----------------------------------------------------------------
-    if (ueventaction->HasIncidentMap(trackID)) {
-        const std::vector<const G4Track*>* secondaries = uStep->GetSecondaryInCurrentStep();
-        if (secondaries) {
-            for (auto sec : *secondaries) {
-                ueventaction->LinkSecondary(trackID, sec->GetTrackID());
-            }
-        }
+    G4int parentID = track->GetParentID();
+    
+    // If this is a secondary track and it isn't in our map yet, 
+    // inherit the root incident ID from its parent.
+    if (parentID > 0 && !ueventaction->HasIncidentMap(trackID)) {
+        ueventaction->LinkSecondary(parentID, trackID);
     }
 
     // ----------------------------------------------------------------
