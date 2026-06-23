@@ -4,7 +4,7 @@
 runaction::runaction(G4String material, G4String step) : G4UserRunAction(), uMaterial(material), uStep(step) {
     auto analysisManager = G4AnalysisManager::Instance();
     #ifdef G4MULTITHREADED
-        analysisManager->SetNtupleMerging(false);
+        analysisManager->SetNtupleMerging(true);
     #endif
     analysisManager->SetDefaultFileType("root");
     analysisManager->SetVerboseLevel(1);

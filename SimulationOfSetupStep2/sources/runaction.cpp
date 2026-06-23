@@ -3,7 +3,7 @@
 runaction::runaction(G4String material, G4String step) : G4UserRunAction(), uMaterial(material), uStep(step) {
     auto analysisManager = G4AnalysisManager::Instance();
     #ifdef G4MULTITHREADED
-        analysisManager->SetNtupleMerging(false);
+        analysisManager->SetNtupleMerging(true);
     #endif
     analysisManager->SetDefaultFileType("root");
     analysisManager->SetVerboseLevel(1);
@@ -36,7 +36,8 @@ G4Run* runaction::GenerateRun() {
 }
 void runaction::BeginOfRunAction(const G4Run* urun){   
     auto analysisManager = G4AnalysisManager::Instance();
-    G4String fileName = SharedParams::dataPath + "detectorSimulationOutput/" + uMaterial + "/Final_" + uMaterial + "_run" + std::to_string(urun->GetRunID()) + ".root";
+    // Updated path and filename for Step 2
+    G4String fileName = SharedParams::dataPath + "detectorSimulationOutput/" + uMaterial + "/DetectorOutput_" + uMaterial + "_run" + std::to_string(urun->GetRunID()) + ".root";
     analysisManager->OpenFile(fileName);
 }
 void runaction::EndOfRunAction(const G4Run* urun){

@@ -13,19 +13,8 @@ namespace SharedParams {
 
     // Dynamic Path Resolution
     inline std::string getDynamicDataPath() {
-        char cwd[1024];
-        if (getcwd(cwd, sizeof(cwd)) != nullptr) {
-            std::string path(cwd);
-            std::string target = "pMultiStepPGGenerator";
-            size_t pos = path.find(target);
-            
-            if (pos != std::string::npos) {
-                // Slice the path up to the end of the target folder name and append /data/
-                return path.substr(0, pos + target.length()) + "/data/";
-            }
-        }
-        // Fallback if the executable is run from completely outside the project tree
-        return "./data/"; 
+        // Hardcoded absolute path for the new simulation project directory
+        return "/omics/groups/OE0471/internal/m361e/master/qPaperSimulations/data/";
     }
 
     // Initialize the path once at runtime

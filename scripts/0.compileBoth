@@ -1,0 +1,6 @@
+cd /omics/groups/OE0471/internal/m361e/master/pMultiStepPGGenerator/PGCreationStep1
+source 0.compile
+cd ..
+cd /omics/groups/OE0471/internal/m361e/master/pMultiStepPGGenerator/SimulationOfSetupStep2
+source 0.compile    
+cd ..    

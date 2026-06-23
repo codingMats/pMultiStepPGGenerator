@@ -1,3 +1,1391 @@
+start of File: ./PGCreationStep1/main.cpp
+//===============================================================================================
+// Std libraries
+//===============================================================================================
+#include <iostream>
+#include <set>
+#include <chrono>
+#include <fstream>
+#include <functional>
+#include <string>
+
+//===============================================================================================
+// Geant libraries
+//===============================================================================================
+#include "G4MTRunManager.hh"
+#include "G4RunManager.hh"
+#include "G4UIExecutive.hh"
+#include "G4UImanager.hh"
+#include "G4VisExecutive.hh"
+#include "G4VisManager.hh"
+#include "G4Threading.hh"
+#include "G4ParallelWorldPhysics.hh"
+
+//===============================================================================================
+// User libraries
+//===============================================================================================
+#include "geometry.h"
+#include "actions.h"
+#include "physics.h"
+#include "../../sharedFiles/shared_materials.h" // Adjust path for Step 2: "../sharedFiles..."
+#include "../../sharedFiles/shared_params.h"
+
+int main(int argc, char** argv) {
+    uint16_t sessionType = 0; 
+    uint16_t nThreads = 1; 
+    uint16_t runNum = 0;
+    int uSeed = 12; 
+    uint64_t nHistories = 2.5e6;
+    std::string macroFile = "";
+    
+    // Default setup
+    std::string targetMaterial = "WaterCa0"; 
+    std::string stepName = "PhaseSpace"; // Change to "Final" for Step 2
+
+    int i = 0;
+    while(++i < argc) {
+        std::string opt(argv[i]);
+        if (opt.compare("-ui") == 0) sessionType = std::stoi(argv[++i]);
+        else if (opt.compare("-n") == 0) nThreads = std::stoi(argv[++i]);
+        else if (opt.compare("-run") == 0) runNum = std::stoi(argv[++i]);
+        else if (opt.compare("-seed") == 0) uSeed = std::stoi(argv[++i]);        
+        else if (opt.compare("-p") == 0) nHistories = std::stoull(argv[++i]);
+        else if (opt == "-macro") macroFile = argv[++i];
+        else if (opt == "-mat") targetMaterial = argv[++i];
+    }
+
+    SharedMaterials::BuildAllMaterials();
+    if (!SharedMaterials::GetTargetMaterial(targetMaterial)) {
+        std::cerr << "FATAL: Material '" << targetMaterial << "' not found." << std::endl; return 1;
+    }
+
+    // NOTE: Keep the phase space integrity check here for Step 2, remove for Step 1.
+
+    #ifdef G4MULTITHREADED
+        if (nThreads == 0) nThreads = G4Thread::hardware_concurrency();
+        G4MTRunManager *runManager = new G4MTRunManager();
+        runManager->SetNumberOfThreads(nThreads);
+    #else
+        G4RunManager *runManager = new G4RunManager();
+    #endif
+
+    G4VModularPhysicsList* physicsList = new physics;
+    physicsList->RegisterPhysics(new G4ParallelWorldPhysics("parallelWorld"));
+
+    runManager->SetUserInitialization(new geometry(targetMaterial));
+    runManager->SetUserInitialization(physicsList);
+    runManager->SetUserInitialization(new actions(targetMaterial, stepName));
+    runManager->Initialize();
+    
+    auto start = std::chrono::steady_clock::now();
+    G4VisManager *visManager = new G4VisExecutive(); visManager->Initialize();
+    G4UImanager  *uiManager  = G4UImanager::GetUIpointer();
+    G4UIExecutive *uiExecutive = 0;
+
+    if (sessionType == 1) {
+        uiExecutive = new G4UIExecutive(argc, argv, "qt");
+        if (!macroFile.empty()) uiManager->ApplyCommand("/control/execute " + macroFile);
+        uiExecutive->SessionStart();
+    } else {
+        if (sessionType == 2) {
+            uiExecutive = new G4UIExecutive(argc, argv, "tcsh");
+            if (!macroFile.empty()) uiManager->ApplyCommand("/control/execute " + macroFile);
+            uiExecutive->SessionStart(); // Added missing SessionStart for tcsh
+        }
+
+        const uint64_t MAX_PER_RUN = 2000000000ULL;
+        if (nHistories > MAX_PER_RUN) {
+            std::cerr << "Error: Number of histories (" << nHistories << ") exceeds the maximum allowed per run (" << MAX_PER_RUN << ")." << std::endl;
+            return 1;
+        }
+
+        // Deterministic Seed Generation
+        std::string seedString = targetMaterial + "_Seed" + std::to_string(uSeed) + "_Run" + std::to_string(runNum);
+        std::hash<std::string> hasher;
+        long deterministicSeed = static_cast<long>(hasher(seedString) % 900000000); 
+
+        G4Random::setTheSeed(deterministicSeed);
+        std::cout << "Starting run " << runNum << " with " << nHistories << " histories (seed: " << G4Random::getTheSeed() << ")" << std::endl;
+
+        runManager->SetRunIDCounter(runNum);
+        runManager->BeamOn(nHistories);
+    }
+
+    auto end = std::chrono::steady_clock::now();
+    G4cout << "elapsed time: " << std::chrono::duration_cast<std::chrono::seconds>(end - start).count() << " s" << G4endl;
+
+    delete runManager; 
+    delete visManager; 
+    if (uiExecutive) delete uiExecutive;
+
+    std::cout << "Simulation completed!" << std::endl;
+    return 0;
+}
+end of File: ./PGCreationStep1/main.cpp
+
+start of File: ./PGCreationStep1/headers/stackaction.h
+#pragma once
+
+//===============================================================================================
+// geant libraries
+//===============================================================================================
+
+#include "G4UserStackingAction.hh"
+#include "G4Track.hh"
+#include "G4LogicalVolume.hh"
+
+//===============================================================================================
+// class prototype
+//===============================================================================================
+
+class stackaction: public G4UserStackingAction
+{
+    public:
+        stackaction();
+        virtual ~stackaction() override;
+        
+        virtual G4ClassificationOfNewTrack ClassifyNewTrack(const G4Track* utrack) override;
+
+    private:
+        const G4ParticleDefinition* uparticle;
+        
+        G4LogicalVolume* pInnerTarget;
+        G4LogicalVolume* pOuterTarget;
+        bool pointersInitialized;
+};
+end of File: ./PGCreationStep1/headers/stackaction.h
+
+start of File: ./PGCreationStep1/headers/actions.h
+#pragma once
+#include "G4VUserActionInitialization.hh"
+#include "generator.h"
+#include "runaction.h"
+#include "eventaction.h"
+#include "stepaction.h"
+#include "stackaction.h"
+#include "G4String.hh"
+
+class actions : public G4VUserActionInitialization {
+    public:
+        actions(G4String material, G4String step);
+        virtual void Build() const override;
+        virtual void BuildForMaster() const override;
+    private:
+        G4String uMaterial;
+        G4String uStep;
+};
+end of File: ./PGCreationStep1/headers/actions.h
+
+start of File: ./PGCreationStep1/headers/generator.h
+#pragma once
+
+//===============================================================================================
+// std libraries
+//===============================================================================================
+
+//===============================================================================================
+// geant libraries
+//===============================================================================================
+
+#include "G4VUserPrimaryGeneratorAction.hh"
+
+#include "G4ParticleGun.hh"
+#include "G4GeneralParticleSource.hh"
+#include "G4ParticleTable.hh"
+
+#include "G4SystemOfUnits.hh"
+#include "G4PhysicalVolumeStore.hh"
+#include "G4VPhysicalVolume.hh"
+
+//===============================================================================================
+// user libraries
+//===============================================================================================
+
+//===============================================================================================
+// Class Prototype
+//===============================================================================================
+
+
+class generator : public G4VUserPrimaryGeneratorAction {    
+    public:
+        generator();
+        virtual ~generator() override;
+
+        virtual void GeneratePrimaries(G4Event* anEvent) override;
+
+        G4double getIEnergy() { return energy; }
+        G4ThreeVector getIPosition() { return position; }
+        G4ThreeVector getIDirection() { return direction; }
+
+    private:
+        G4GeneralParticleSource *uParticleGPS;
+        G4double energy = -1;
+        G4ThreeVector position, direction;
+};
+end of File: ./PGCreationStep1/headers/generator.h
+
+start of File: ./PGCreationStep1/headers/trackinfo.h
+#pragma once
+#include "G4VUserTrackInformation.hh"
+
+class trackinfo : public G4VUserTrackInformation {
+    public:
+        trackinfo(G4int tz, G4int ta, G4int intID)
+            : targetZ(tz), targetA(ta), interactionID(intID) {}
+        virtual ~trackinfo() override {}
+        virtual void Print() const override {}
+
+        G4int GetTargetZ() const { return targetZ; }
+        G4int GetTargetA() const { return targetA; }
+        G4int GetInteractionID() const { return interactionID; }
+
+    private:
+        G4int targetZ;
+        G4int targetA;
+        G4int interactionID;
+};
+end of File: ./PGCreationStep1/headers/trackinfo.h
+
+start of File: ./PGCreationStep1/headers/pworld.h
+#pragma once
+
+//===============================================================================================
+// std libraries
+//===============================================================================================
+
+//===============================================================================================
+// geant libraries
+//===============================================================================================
+
+#include "G4VUserParallelWorld.hh"
+
+#include "G4VPhysicalVolume.hh"
+#include "G4LogicalVolume.hh"
+
+//===============================================================================================
+// user libraries
+//===============================================================================================
+
+//===============================================================================================
+// class prototype
+//===============================================================================================
+
+class pworld : public G4VUserParallelWorld
+{
+    public:
+        pworld(G4String uname);
+        virtual ~pworld() override;
+
+    public:
+        virtual void Construct() override;
+        virtual void ConstructSD() override;
+};
+end of File: ./PGCreationStep1/headers/pworld.h
+
+start of File: ./PGCreationStep1/headers/eventaction.h
+#pragma once
+
+#include <unordered_map>
+#include <vector>
+#include <string>
+
+#include "G4RunManager.hh"
+#include "G4UserEventAction.hh"
+#include "G4Event.hh"
+#include "G4AnalysisManager.hh"
+#include "G4AutoLock.hh"
+
+#include "geometry.h"
+#include "runaction.h"
+#include "generator.h"
+
+// Structure to hold data for a single incident particle and its entire resulting shower
+struct IncidentRecord {
+    G4int pdg;
+    std::string process;
+    G4double creationEnergy;
+    G4double globalTime;
+    G4double firstBGOHitTime;
+    G4double eDepCeBr3;
+    std::vector<G4double> eDepBGO;
+    
+    IncidentRecord() : pdg(0), creationEnergy(0), globalTime(0),firstBGOHitTime(-1.0), eDepCeBr3(0) {}
+};
+
+class eventaction: public G4UserEventAction {
+    public:
+        eventaction(runaction *runaction, generator *generator);
+        virtual ~eventaction() override;
+
+        virtual void BeginOfEventAction(const G4Event* uevent) override;
+        virtual void EndOfEventAction(const G4Event* uevent) override;
+
+        // Anti-coincidence logic mapping
+        void AddIncidentParticle(G4int trackID, G4int pdg, std::string process, G4double energy, G4double time);
+        void LinkSecondary(G4int parentTrackID, G4int secondaryTrackID);
+        void AddEnergy(G4int trackID, G4int copyNo, G4double edep, G4bool isPrimary, G4double hitTime);
+        bool HasIncidentMap(G4int trackID);
+
+    private:
+        runaction *urunaction;
+        generator *ugenerator;
+        G4int eventID;
+
+        // Maps any TrackID (primary or N-th generation secondary) back to the original Incident ID
+        std::unordered_map<G4int, G4int> trackToIncidentMap;
+        // Stores the physical data for each unique Incident ID
+        std::unordered_map<G4int, IncidentRecord> incidentData;
+};
+end of File: ./PGCreationStep1/headers/eventaction.h
+
+start of File: ./PGCreationStep1/headers/geometry.h
+#pragma once
+
+//===============================================================================================
+// std libraries
+//===============================================================================================
+#include <vector>
+
+//===============================================================================================
+// geant libraries
+//===============================================================================================
+
+#include "G4VUserDetectorConstruction.hh"
+
+#include "G4Box.hh"
+#include "G4Tubs.hh"
+
+#include "G4PVPlacement.hh"
+#include "G4VPhysicalVolume.hh"
+#include "G4LogicalVolume.hh"
+#include "G4VisAttributes.hh"
+
+#include "G4Material.hh"
+#include "G4NistManager.hh"
+#include "G4MaterialPropertiesTable.hh"
+
+#include "G4ProductionCutsTable.hh"
+#include "G4UserLimits.hh"
+#include "G4SystemOfUnits.hh"
+
+//===============================================================================================
+// class prototype
+//===============================================================================================
+class geometry : public G4VUserDetectorConstruction {
+    public:
+        geometry(G4String targetMatName);
+        virtual ~geometry() override;
+
+        virtual G4VPhysicalVolume* Construct() override;
+        virtual void ConstructSDandField() override;
+
+        G4LogicalVolume* getLogicalWorld() const { return lWorld; }
+        std::vector<G4LogicalVolume*> getLogicalPrimary() const { return lPrimary; }
+        std::vector<G4LogicalVolume*> getLogicalACShield() const { return lACShield; }
+        G4int getNDetectors() const { return nDetectors; }
+
+    private:
+        G4String uTargetMatName; // ADD THIS
+
+        // Material pointers
+        G4Material *matVacuum; G4Material *matAir; G4Material *matAl;
+        G4Material *matTeflon; G4Material *matTungsten; G4Material *matCeBr3;
+        G4Material *matBGO; G4Material *matPolystyrene; G4Material *matCaO; G4Material *matWater;
+        
+        G4LogicalVolume *lWorld; G4VPhysicalVolume *pWorld;
+        std::vector<G4LogicalVolume*> lPrimary; std::vector<G4LogicalVolume*> lACShield; std::vector<G4LogicalVolume*> lCollimator;
+        G4int nDetectors; G4RotationMatrix* rotDetector; std::vector<G4VisAttributes*> visAttributes;
+};
+end of File: ./PGCreationStep1/headers/geometry.h
+
+start of File: ./PGCreationStep1/headers/runaction.h
+#pragma once
+#include "G4RunManager.hh"
+#include "G4UserRunAction.hh"
+#include "G4Run.hh"
+#include "G4AnalysisManager.hh"
+#include "G4String.hh"
+#include "run.h"
+#include "geometry.h"
+
+class G4Run;
+
+class runaction: public G4UserRunAction {
+    public:
+        runaction(G4String material, G4String step);
+        virtual ~runaction() override;
+        
+        virtual G4Run* GenerateRun() override;
+        virtual void BeginOfRunAction(const G4Run* urun) override;
+        virtual void EndOfRunAction(const G4Run* urun) override;
+    private:
+        G4String uMaterial;
+        G4String uStep;
+};
+end of File: ./PGCreationStep1/headers/runaction.h
+
+start of File: ./PGCreationStep1/headers/physics.h
+#pragma once
+
+//===============================================================================================
+// std libraries
+//===============================================================================================
+
+//===============================================================================================
+// geant libraries
+//===============================================================================================
+
+#include "G4VUserPhysicsList.hh"
+#include "G4VModularPhysicsList.hh"
+
+#include "G4UserLimits.hh"
+
+#include "G4EmStandardPhysics_option4.hh"
+#include "G4EmExtraPhysics.hh"
+#include "G4EmParameters.hh"
+
+#include "G4DecayPhysics.hh"
+#include "G4RadioactiveDecayPhysics.hh"
+
+#include "G4HadronElasticPhysicsHP.hh"
+#include "G4HadronPhysicsQGSP_BIC_HP.hh"
+#include "G4HadronPhysicsINCLXX.hh"
+
+#include "G4StoppingPhysics.hh"
+
+#include "G4IonElasticPhysics.hh"
+#include "G4IonPhysics.hh"
+
+#include "G4BosonConstructor.hh"
+#include "G4LeptonConstructor.hh"
+#include "G4MesonConstructor.hh"
+#include "G4BaryonConstructor.hh"
+#include "G4IonConstructor.hh"
+#include "G4ShortLivedConstructor.hh"
+
+#include "G4StepLimiter.hh"
+#include "G4ProcessManager.hh"
+
+#include "G4SystemOfUnits.hh"
+
+//===============================================================================================
+// user libraries
+//===============================================================================================
+
+#pragma once
+
+//===============================================================================================
+// Class Prototype
+//===============================================================================================
+
+class physics : public G4VModularPhysicsList {
+    public:
+        physics();
+        virtual ~physics() override;
+            
+        virtual void  SetCuts () override;          // setting a range cut value for all particles
+        virtual void  ConstructProcess() override;  // construct processes and register them to particles
+        virtual void  ConstructParticle() override; // construction of particles
+
+    private:    
+        const G4int uVerbose = 0;
+
+        G4VPhysicsConstructor *plEM = nullptr;
+        G4VPhysicsConstructor *plDecay = nullptr;
+        G4VPhysicsConstructor *plRadioactiveDecay = nullptr;
+        G4VPhysicsConstructor *plHadronElastic = nullptr;
+        G4VPhysicsConstructor *plHadronInelastic = nullptr;    
+        G4VPhysicsConstructor *plEMextra = nullptr;
+        G4VPhysicsConstructor *plStoppping = nullptr;
+        G4VPhysicsConstructor *plIonElastic = nullptr;
+        G4VPhysicsConstructor *plIonInelastic = nullptr;    
+};
+end of File: ./PGCreationStep1/headers/physics.h
+
+start of File: ./PGCreationStep1/headers/run.h
+#pragma once
+
+//===============================================================================================
+// std libraries
+//===============================================================================================
+
+//===============================================================================================
+// geant libraries
+//===============================================================================================
+
+#include "G4Run.hh"
+
+//===============================================================================================
+// user libraries
+//===============================================================================================
+
+//===============================================================================================
+// class prototype
+//===============================================================================================
+
+class run : public G4Run {
+    public:
+        run();
+        virtual ~run() override;
+
+    private:
+};
+end of File: ./PGCreationStep1/headers/run.h
+
+start of File: ./PGCreationStep1/headers/stepaction.h
+#pragma once
+
+//===============================================================================================
+// geant libraries
+//===============================================================================================
+
+#include "G4RunManager.hh"
+#include "G4UserSteppingAction.hh"
+#include "G4Step.hh"
+
+#include "G4Gamma.hh"
+#include "G4Proton.hh"
+#include "G4LogicalVolume.hh"
+#include "G4HadronicProcess.hh"
+#include "G4Nucleus.hh"
+
+//===============================================================================================
+// user libraries
+//===============================================================================================
+
+#include "eventaction.h"
+#include "trackinfo.h"
+
+//===============================================================================================
+// class prototype
+//===============================================================================================
+
+class stepaction: public G4UserSteppingAction
+{
+    public:
+        stepaction(eventaction *eventaction);
+        virtual ~stepaction() override;
+
+        virtual void UserSteppingAction(const G4Step*) override;
+
+    private:
+        eventaction *ueventaction;
+        
+        G4LogicalVolume* pOuterTarget;
+        G4LogicalVolume* pWorld;
+        bool pointersInitialized;
+};
+end of File: ./PGCreationStep1/headers/stepaction.h
+
+start of File: ./PGCreationStep1/macros/vis.mac
+#verbose level
+/vis/verbose errors
+
+# use this open statment to create an OpenGl view:
+/vis/open OGL 1200x728
+
+# draw geometry
+/vis/drawVolume worlds
+
+# specify view angle (polar coords)
+/vis/viewer/set/rotationStyle freeRotation
+#/vis/viewer/set/viewpointThetaPhi 0. 0. deg
+/vis/viewer/set/viewpointThetaPhi 30. 30. deg
+
+# specify zoom value
+/vis/viewer/zoom 1.0
+
+# insert axis
+#/vis/scene/add/axes 0 0 -.25 .5 m
+#/vis/scene/add/axes 0 0 0 .05625 m
+#/vis/scene/add/axes 0 0 -.25 .25 m
+
+# viewer line width
+/vis/viewer/set/lineWidth 1
+
+# draw smooth trajectories at end of event, showing trajectory points
+# blue: positive charge
+# red: negative charge
+# green: no charge  
+# yellow: vertixes, when a line ends and another one starts
+# as markers 2 pixels wide
+# color by the charge
+
+/vis/scene/add/trajectories smooth
+# /vis/modeling/trajectories/create/drawByCharge
+# /vis/modeling/trajectories/drawByCharge-0/default/setDrawStepPts true
+# /vis/modeling/trajectories/drawByCharge-0/default/setStepPtsSize 2
+
+/vis/modeling/trajectories/create/drawByParticleID
+/vis/modeling/trajectories/drawByParticleID-0/default/setDrawStepPts true
+/vis/modeling/trajectories/drawByParticleID-0/default/setStepPtsSize 2
+
+# Assign specific colors to particle types
+/vis/modeling/trajectories/drawByParticleID-0/set gamma cyan
+/vis/modeling/trajectories/drawByParticleID-0/set neutron green
+/vis/modeling/trajectories/drawByParticleID-0/set proton blue
+/vis/modeling/trajectories/drawByParticleID-0/set e- red
+/vis/modeling/trajectories/drawByParticleID-0/set e+ magenta
+
+# update to every event
+/vis/viewer/set/autoRefresh true
+
+# to superimpose all of the events from a given run:
+/vis/scene/endOfEventAction accumulate
+end of File: ./PGCreationStep1/macros/vis.mac
+
+start of File: ./PGCreationStep1/sources/physics.cpp
+//===============================================================================================
+// std libraries
+//===============================================================================================
+
+//===============================================================================================
+// geant libraries
+//===============================================================================================
+
+//===============================================================================================
+// user libraries
+//===============================================================================================
+
+#include "physics.h"
+
+//===============================================================================================
+// de/constructor
+//===============================================================================================
+
+physics::physics():
+G4VModularPhysicsList(){
+    SetVerboseLevel(uVerbose);
+
+    plEM = new G4EmStandardPhysics_option4(uVerbose);
+    plEMextra = new G4EmExtraPhysics(uVerbose);
+
+    plDecay = new G4DecayPhysics(uVerbose);
+    plRadioactiveDecay = new G4RadioactiveDecayPhysics(uVerbose);
+
+    plHadronElastic = new G4HadronElasticPhysicsHP(uVerbose);
+    plHadronInelastic = new G4HadronPhysicsQGSP_BIC_HP(uVerbose);
+    // Arguments: (Name, QuasiElastic, NeutronHP, FTFP)
+    // plHadronInelastic = new G4HadronPhysicsINCLXX("hInelastic INCLXX", true, true, false);
+
+    plStoppping = new G4StoppingPhysics(uVerbose);
+
+    plIonElastic = new G4IonElasticPhysics(uVerbose);
+    plIonInelastic = new G4IonPhysics(uVerbose);
+}
+
+physics::~physics() {
+    delete plEM;
+    delete plEMextra;
+    delete plDecay;
+    delete plRadioactiveDecay;
+    delete plHadronElastic;
+    delete plHadronInelastic;
+    delete plStoppping;
+    delete plIonElastic;
+    delete plIonInelastic;
+}
+
+//===============================================================================================
+// particles constructors
+//===============================================================================================
+
+void physics::ConstructParticle(){
+    G4BosonConstructor      pcBosons;       pcBosons.ConstructParticle();
+    G4LeptonConstructor     pcLeptons;      pcLeptons.ConstructParticle();
+    G4MesonConstructor      pcMesons;       pcMesons.ConstructParticle();
+    G4BaryonConstructor     pcBaryons;      pcBaryons.ConstructParticle();
+    G4IonConstructor        pcIons;         pcIons.ConstructParticle();
+    G4ShortLivedConstructor pcShortLived;   pcShortLived.ConstructParticle();
+}
+
+//===============================================================================================
+// processes constructors
+//===============================================================================================
+
+void physics::ConstructProcess(){        
+    AddTransportation(); 
+
+    if (plEM != nullptr)               plEM->ConstructProcess();
+    if (plEMextra != nullptr)          plEMextra->ConstructProcess();
+    if (plDecay != nullptr)            plDecay->ConstructProcess();
+    if (plRadioactiveDecay != nullptr) plRadioactiveDecay->ConstructProcess();
+    if (plHadronElastic != nullptr)    plHadronElastic->ConstructProcess();
+    if (plHadronInelastic != nullptr)  plHadronInelastic->ConstructProcess();
+    if (plStoppping != nullptr)        plStoppping->ConstructProcess();
+    if (plIonElastic != nullptr)       plIonElastic->ConstructProcess();
+    if (plIonInelastic != nullptr)     plIonInelastic->ConstructProcess();
+
+    //===============================================================================
+    // Electromagnetic Processes
+    //===============================================================================
+        
+    G4EmParameters* params = G4EmParameters::Instance();    
+    params->SetFluo(true);
+    params->SetAuger(false);
+    params->SetPixe(false);
+
+    // Set Region
+    params->SetDeexActiveRegion("rtarget", true, false, false);   // <region name>, <fluo>, <auger>, <pixe>
+
+    // PIXE & Flourescence cross section (Empirical, ECPSSR_FormFactor, ECPSSR_Analytical, ECPSSR_ANSTO)
+    params->SetPIXECrossSectionModel("ECPSSR_ANSTO");
+    params->SetPIXEElectronCrossSectionModel("ECPSSR_ANSTO");
+
+    params->SetDeexcitationIgnoreCut(true);
+}
+
+/*-----------------*/
+/* simulation Cuts */
+/*-----------------*/
+
+void physics::SetCuts()
+{
+    // default cuts of 1.*mm
+    SetCutsWithDefault();
+  
+    // user cuts for world    
+    G4double ucut = 1.*mm;
+    
+    SetCutValue(ucut, "e-");
+    SetCutValue(ucut, "e+");
+    SetCutValue(ucut, "proton");
+}
+end of File: ./PGCreationStep1/sources/physics.cpp
+
+start of File: ./PGCreationStep1/sources/runaction.cpp
+#include "runaction.h"
+#include "../../sharedFiles/shared_params.h"
+
+runaction::runaction(G4String material, G4String step) : G4UserRunAction(), uMaterial(material), uStep(step) {
+    auto analysisManager = G4AnalysisManager::Instance();
+    #ifdef G4MULTITHREADED
+        analysisManager->SetNtupleMerging(true);
+    #endif
+    analysisManager->SetDefaultFileType("root");
+    analysisManager->SetVerboseLevel(1);
+    
+    analysisManager->CreateNtuple("PhaseSpace", "Scored Particles on Outer Cylinder");
+    analysisManager->CreateNtupleIColumn("eventid");          // 0
+    analysisManager->CreateNtupleIColumn("pdg");              // 1
+    analysisManager->CreateNtupleDColumn("energy_MeV");       // 2
+    analysisManager->CreateNtupleDColumn("pos_x_cm");         // 3
+    analysisManager->CreateNtupleDColumn("pos_y_cm");         // 4
+    analysisManager->CreateNtupleDColumn("pos_z_cm");         // 5
+    analysisManager->CreateNtupleDColumn("mom_dir_x");        // 6
+    analysisManager->CreateNtupleDColumn("mom_dir_y");        // 7
+    analysisManager->CreateNtupleDColumn("mom_dir_z");        // 8
+    analysisManager->CreateNtupleDColumn("time_ns");          // 9
+    
+    // New parameters
+    analysisManager->CreateNtupleDColumn("creation_energy_MeV"); // 10
+    analysisManager->CreateNtupleSColumn("creation_process");    // 11
+    analysisManager->CreateNtupleIColumn("target_Z");            // 12
+    analysisManager->CreateNtupleIColumn("target_A");            // 13
+    analysisManager->CreateNtupleIColumn("interaction_id");      // 14
+    
+    analysisManager->FinishNtuple(0);
+}
+
+runaction::~runaction(){
+}
+
+G4Run* runaction::GenerateRun() {
+    return new run;
+}
+void runaction::BeginOfRunAction(const G4Run* urun){   
+    auto analysisManager = G4AnalysisManager::Instance();
+    G4String fileName = SharedParams::dataPath + "materialPhaseSpaces/" + uMaterial + "/tmp_multifiles/PhaseSpace_" + uMaterial + "_run" + std::to_string(urun->GetRunID()) + ".root";
+    analysisManager->OpenFile(fileName);
+}
+
+void runaction::EndOfRunAction(const G4Run* urun){
+    auto analysisManager = G4AnalysisManager::Instance();
+    analysisManager->Write();
+    analysisManager->CloseFile();
+}
+end of File: ./PGCreationStep1/sources/runaction.cpp
+
+start of File: ./PGCreationStep1/sources/pworld.cpp
+//===============================================================================================
+// std libraries
+//===============================================================================================
+
+//===============================================================================================
+// geant libraries
+//===============================================================================================
+
+//===============================================================================================
+// user libraries
+//===============================================================================================
+
+#include "pworld.h"
+
+//===============================================================================================
+// de/constructor
+//===============================================================================================
+
+pworld::pworld(G4String uname):
+G4VUserParallelWorld(uname) {
+}
+
+pworld::~pworld() {
+}
+
+//===============================================================================================
+// define simulation geometry
+//===============================================================================================
+
+void pworld::Construct() {
+    //-------------------------------------------------
+    // general variables
+    //-------------------------------------------------   
+
+    G4RotationMatrix *norotation = new G4RotationMatrix(0., 0., 0.);
+    G4ThreeVector atorigin = {0., 0., 0.};
+
+    //-------------------------------------------------
+    // world definition
+    //-------------------------------------------------   
+
+    G4VPhysicalVolume* gworld = GetWorld();
+    G4LogicalVolume* lworld = gworld->GetLogicalVolume();
+}
+
+//===============================================================================================
+// sensitive detectors
+//===============================================================================================
+
+void pworld::ConstructSD() {
+}
+end of File: ./PGCreationStep1/sources/pworld.cpp
+
+start of File: ./PGCreationStep1/sources/eventaction.cpp
+#include "eventaction.h"
+
+namespace {
+    G4Mutex threadLocker = G4MUTEX_INITIALIZER;
+}
+
+eventaction::eventaction(runaction *runaction, generator *generator):
+G4UserEventAction(), urunaction(runaction), ugenerator(generator) {
+}
+
+eventaction::~eventaction(){
+}
+
+void eventaction::BeginOfEventAction(const G4Event* uEvent){
+    eventID = uEvent->GetEventID();
+    
+    // Clear the tracking maps and force memory deallocation
+    std::unordered_map<G4int, G4int>().swap(trackToIncidentMap);
+    std::unordered_map<G4int, IncidentRecord>().swap(incidentData);
+}
+
+
+
+void eventaction::EndOfEventAction(const G4Event* uEvent) {
+    G4int evtShow = 1e7;
+    if(eventID % evtShow == 0) {
+        G4cout << "event: " << eventID << G4endl;
+    }
+
+    auto analysisManager = G4AnalysisManager::Instance();
+
+    for (const auto& pair : incidentData) {
+        const IncidentRecord& record = pair.second;
+        
+        G4double totalBGO = 0;
+        for (G4double bgoEdep : record.eDepBGO) totalBGO += bgoEdep;
+        if (record.eDepCeBr3 == 0 && totalBGO == 0) continue;
+
+        analysisManager->FillNtupleIColumn(0, 0, eventID);
+        analysisManager->FillNtupleIColumn(0, 1, record.pdg);
+        analysisManager->FillNtupleSColumn(0, 2, record.process);
+        analysisManager->FillNtupleDColumn(0, 3, record.creationEnergy);
+        analysisManager->FillNtupleDColumn(0, 4, record.globalTime);
+        analysisManager->FillNtupleDColumn(0, 5, record.eDepCeBr3);
+        
+       // Ensure 8 columns are filled for the NTuple, padding with 0 if necessary
+        for (size_t i = 0; i < 8; ++i) {
+            G4double energy = (i < record.eDepBGO.size()) ? record.eDepBGO[i] : 0.0;
+            analysisManager->FillNtupleDColumn(0, 6 + i, energy);
+        }
+
+        // Fill the new BGO time column at index 14
+        analysisManager->FillNtupleDColumn(0, 14, record.firstBGOHitTime);
+
+        analysisManager->AddNtupleRow(0);
+    }
+}
+
+void eventaction::AddIncidentParticle(G4int trackID, G4int pdg, std::string process, G4double energy, G4double time) {
+    // Traverse the ancestry tree to find the root particle
+    G4int rootID = trackID;
+    while (trackToIncidentMap.find(rootID) != trackToIncidentMap.end() && trackToIncidentMap[rootID] != rootID) {
+        rootID = trackToIncidentMap[rootID];
+    }
+
+    // Set the root map
+    trackToIncidentMap[trackID] = rootID;
+    
+    // Only create a new physical record if the root isn't already tracked
+    if (incidentData.find(rootID) == incidentData.end()) {
+        IncidentRecord record;
+        record.pdg = pdg;
+        record.process = process;
+        record.creationEnergy = energy;
+        record.globalTime = time;
+        
+        incidentData[rootID] = record;
+    }
+}
+
+void eventaction::LinkSecondary(G4int parentTrackID, G4int secondaryTrackID) {
+    // If the parent has an incident root, link the secondary to that root.
+    // Otherwise, link the secondary to the parent directly, establishing an ancestry chain.
+    if (trackToIncidentMap.find(parentTrackID) != trackToIncidentMap.end()) {
+        trackToIncidentMap[secondaryTrackID] = trackToIncidentMap[parentTrackID];
+    }
+}
+
+bool eventaction::HasIncidentMap(G4int trackID) {
+    return trackToIncidentMap.find(trackID) != trackToIncidentMap.end();
+}
+void eventaction::AddEnergy(G4int trackID, G4int copyNo, G4double edep, G4bool isPrimary, G4double hitTime) {
+    if (trackToIncidentMap.find(trackID) == trackToIncidentMap.end()) return;
+    
+    G4int incidentID = trackToIncidentMap[trackID];
+    
+    if (isPrimary) {
+        incidentData[incidentID].eDepCeBr3 += edep;
+    } else {
+        G4int bgoIndex = copyNo - 1; 
+        if (bgoIndex >= 0) {
+            // Dynamically resize vector if a new BGO copy number is found
+            if (bgoIndex >= incidentData[incidentID].eDepBGO.size()) {
+                incidentData[incidentID].eDepBGO.resize(bgoIndex + 1, 0.0);
+            }
+            incidentData[incidentID].eDepBGO[bgoIndex] += edep;
+
+            // Track the earliest hit time in the BGO
+            if (incidentData[incidentID].firstBGOHitTime < 0.0 || hitTime < incidentData[incidentID].firstBGOHitTime) {
+                incidentData[incidentID].firstBGOHitTime = hitTime;
+            }
+        }
+    }
+}
+end of File: ./PGCreationStep1/sources/eventaction.cpp
+
+start of File: ./PGCreationStep1/sources/run.cpp
+//===============================================================================================
+// std libraries
+//===============================================================================================
+
+//===============================================================================================
+// geant libraries
+//===============================================================================================
+
+//===============================================================================================
+// user libraries
+//===============================================================================================
+
+#include "run.h"
+
+//===============================================================================================
+// de/constructor
+//===============================================================================================
+
+
+run::run():
+G4Run(){  
+}
+
+run::~run(){  
+}
+
+end of File: ./PGCreationStep1/sources/run.cpp
+
+start of File: ./PGCreationStep1/sources/actions.cpp
+#include "actions.h"
+
+actions::actions(G4String material, G4String step) : uMaterial(material), uStep(step) {}
+
+void actions::BuildForMaster() const{
+    runaction *uRunAction = new runaction(uMaterial, uStep);
+    SetUserAction(uRunAction);
+}
+
+void actions::Build() const {        
+    // Step 1 Generator takes no arguments
+    generator   *uGenerator     = new generator(); 
+
+    runaction   *uRunAction     = new runaction(uMaterial, uStep);
+    eventaction *uEventAction   = new eventaction(uRunAction, uGenerator);
+    stepaction  *uStepAction    = new stepaction(uEventAction);
+    stackaction *uStackAction   = new stackaction();
+
+    SetUserAction(uGenerator); 
+    SetUserAction(uRunAction);
+    SetUserAction(uEventAction); 
+    SetUserAction(uStepAction); 
+    SetUserAction(uStackAction);
+}
+end of File: ./PGCreationStep1/sources/actions.cpp
+
+start of File: ./PGCreationStep1/sources/geometry.cpp
+//===============================================================================================
+// User libraries
+//===============================================================================================
+
+#include "geometry.h"
+#include "../../sharedFiles/shared_materials.h"
+#include "../../sharedFiles/shared_params.h"
+//===============================================================================================
+// De/constructor
+//===============================================================================================
+geometry::geometry(G4String targetMatName) : uTargetMatName(targetMatName) {
+    G4NistManager* nist = G4NistManager::Instance();
+    matVacuum = nist->FindOrBuildMaterial("G4_Galactic");
+    matAir    = nist->FindOrBuildMaterial("G4_AIR");
+    matAl     = nist->FindOrBuildMaterial("G4_Al");
+    matWater  = nist->FindOrBuildMaterial("G4_WATER");
+    
+    // Fetch custom materials that were built by SharedMaterials::BuildAllMaterials()
+    matTeflon      = G4Material::GetMaterial("teflon");
+    matTungsten    = G4Material::GetMaterial("tungsten");
+    matCeBr3       = G4Material::GetMaterial("CeBr3");
+    matBGO         = G4Material::GetMaterial("BGO");
+    matPolystyrene = G4Material::GetMaterial("polystyrene");
+    matCaO         = G4Material::GetMaterial("calcium_oxide");
+}
+geometry::~geometry() {    
+    if (rotDetector) {
+        delete rotDetector;
+    }
+    
+    for (auto vis : visAttributes) {
+        delete vis;
+    }
+    visAttributes.clear();
+}
+
+//===============================================================================================
+// define simulation geometry
+//===============================================================================================
+
+G4VPhysicalVolume* geometry::Construct() {
+    G4double margin = 1.5 * cm;
+    G4double worldRadius = SharedParams::targetRadius + margin;
+    G4double worldHL = SharedParams::targetHalfLength + 5.0 * cm; 
+
+    G4Tubs* sWorld = new G4Tubs("sWorld", 0, worldRadius, worldHL, 0.*deg, 360.*deg);
+    lWorld = new G4LogicalVolume(sWorld, matVacuum, "lWorld");
+    G4VPhysicalVolume* pWorld = new G4PVPlacement(nullptr, {0, 0, 0}, lWorld, "pWorld", 0, false, 0, true);
+
+    G4Material* targetMaterial = SharedMaterials::GetTargetMaterial(uTargetMatName);
+
+    G4Tubs* sTarget = new G4Tubs("sTarget", 0, SharedParams::targetRadius, SharedParams::targetHalfLength, 0.*deg, 360.*deg);
+    G4LogicalVolume* lTarget = new G4LogicalVolume(sTarget, targetMaterial, "lTarget");
+    
+    G4VisAttributes *vTarget = new G4VisAttributes(true, G4Colour(0.7, 0.7, 0.7, 1.0));
+    vTarget->SetForceSolid(true);
+    visAttributes.push_back(vTarget);
+    lTarget->SetVisAttributes(vTarget);
+
+    // Placed at origin. Beam will be offset by -5cm.
+    new G4PVPlacement(nullptr, {0., 0., 0.}, lTarget, "pOuterTarget", lWorld, false, 0, true);
+
+    return pWorld;
+}
+
+void geometry::ConstructSDandField(){
+}
+end of File: ./PGCreationStep1/sources/geometry.cpp
+
+start of File: ./PGCreationStep1/sources/generator.cpp
+//===============================================================================================
+// std libraries
+//===============================================================================================
+
+//===============================================================================================
+// geant libraries
+//===============================================================================================
+
+//===============================================================================================
+// user libraries
+//===============================================================================================
+
+#include "generator.h"
+#include "G4PhysicalVolumeStore.hh"
+#include "G4VPhysicalVolume.hh"
+#include "G4SystemOfUnits.hh"
+#include "G4ParticleTable.hh"
+#include "G4GeneralParticleSource.hh"
+
+//===============================================================================================
+// de/constructor
+//===============================================================================================
+generator::generator(): 
+G4VUserPrimaryGeneratorAction() {        
+    uParticleGPS = new G4GeneralParticleSource();
+    
+    // 1. Particle Type
+    G4ParticleDefinition* particle = G4ParticleTable::GetParticleTable()->FindParticle("proton");
+    uParticleGPS->GetCurrentSource()->SetParticleDefinition(particle);
+    uParticleGPS->SetNumberOfParticles(1);
+
+    // 2. Beam Energy
+    uParticleGPS->GetCurrentSource()->GetEneDist()->SetEnergyDisType("Mono");
+    uParticleGPS->GetCurrentSource()->GetEneDist()->SetMonoEnergy(100.2098319 * MeV);
+
+    // 3. Beam Position & Spatial Distribution
+// 3. Beam Position & Spatial Distribution
+G4double fwhm = 15.9 * mm;
+G4double sigma = fwhm / 2.3548; 
+
+// Dynamically retrieve target position
+G4double targetX = 0.0;
+G4double targetY = 0.0;
+G4double targetZ = 0.0;
+G4double sourceTargetDistance = 10.0; // Distance from source to target in cm
+G4VPhysicalVolume* targetVol = G4PhysicalVolumeStore::GetInstance()->GetVolume("pOuterTarget");
+if (targetVol) {
+    targetX = targetVol->GetTranslation().x();
+    targetY = targetVol->GetTranslation().y();
+    targetZ = targetVol->GetTranslation().z();
+}
+
+G4SPSPosDistribution* posDist = uParticleGPS->GetCurrentSource()->GetPosDist();
+
+// Offset the source 10 cm upstream of the target's center along the Z-axis
+posDist->SetCentreCoords(G4ThreeVector(targetX, targetY, targetZ - sourceTargetDistance * cm));
+
+// Define the 2D distribution type
+posDist->SetPosDisType("Beam");
+posDist->SetPosDisShape("Circle"); 
+
+// --------------------------------------------------------------------------
+// Align the GPS local XY distribution plane to the global XY plane
+// --------------------------------------------------------------------------
+posDist->SetPosRot1(G4ThreeVector(1., 0., 0.)); // GPS Local X maps to Global X
+posDist->SetPosRot2(G4ThreeVector(0., 1., 0.)); // GPS Local Y maps to Global Y
+
+// Apply the symmetric 2D sigma in the new XY plane
+posDist->SetBeamSigmaInR(sigma);
+
+// 4. Momentum Direction (Propagate along Z)
+uParticleGPS->GetCurrentSource()->GetAngDist()->SetAngDistType("planar");
+uParticleGPS->GetCurrentSource()->GetAngDist()->SetParticleMomentumDirection(G4ThreeVector(0., 0., 1.));
+}
+generator::~generator() {
+    delete uParticleGPS;
+}
+
+//===============================================================================================
+// generate primaries
+//===============================================================================================
+
+void generator::GeneratePrimaries(G4Event* anEvent) {
+    uParticleGPS->GeneratePrimaryVertex(anEvent);
+    G4PrimaryVertex* vertex = anEvent->GetPrimaryVertex();
+
+    if (vertex) {
+        G4PrimaryParticle* particle = vertex->GetPrimary();
+
+        // Get the particle information.
+        if (particle) {
+            energy = particle->GetKineticEnergy();
+            position = vertex->GetPosition();
+            direction = particle->GetMomentumDirection();
+
+        // If for some reason there is no particle, set energy to -1.
+        } else { energy = -1; }
+    }
+}
+end of File: ./PGCreationStep1/sources/generator.cpp
+
+start of File: ./PGCreationStep1/sources/stackaction.cpp
+#include "stackaction.h"
+#include "G4Gamma.hh"
+#include "G4Neutron.hh"
+#include "G4LogicalVolumeStore.hh"
+#include "G4SystemOfUnits.hh"
+
+stackaction::stackaction() : 
+pInnerTarget(nullptr), pOuterTarget(nullptr), pointersInitialized(false) {    
+}
+
+stackaction::~stackaction(){    
+}
+
+G4ClassificationOfNewTrack stackaction::ClassifyNewTrack(const G4Track* utrack) {
+
+    return fUrgent;    
+}
+end of File: ./PGCreationStep1/sources/stackaction.cpp
+
+start of File: ./PGCreationStep1/sources/stepaction.cpp
+#include "stepaction.h"
+#include "G4SystemOfUnits.hh"
+#include "G4LogicalVolumeStore.hh"
+#include "G4EventManager.hh"
+#include "G4NistManager.hh"
+#include "G4Nucleus.hh"
+#include "G4HadronicProcess.hh"
+#include "G4AnalysisManager.hh"
+#include "trackinfo.h"
+#include "../../sharedFiles/shared_params.h"
+
+stepaction::stepaction(eventaction *eventaction): 
+G4UserSteppingAction(), ueventaction(eventaction), pOuterTarget(nullptr), pWorld(nullptr), pointersInitialized(false){}
+
+stepaction::~stepaction(){}
+
+void stepaction::UserSteppingAction(const G4Step *uStep){
+    G4Track* track = uStep->GetTrack();
+
+    // 15-minute time cutoff
+    if (track->GetGlobalTime() > 900.0 * s) {
+        track->SetTrackStatus(fStopAndKill);
+        return;
+    }
+
+    if (!pointersInitialized) {
+        pOuterTarget = G4LogicalVolumeStore::GetInstance()->GetVolume("lTarget", false);
+        pWorld = G4LogicalVolumeStore::GetInstance()->GetVolume("lWorld", false);
+        pointersInitialized = true;
+    }
+
+    G4StepPoint* preStepPoint  = uStep->GetPreStepPoint();
+    G4StepPoint* postStepPoint = uStep->GetPostStepPoint();
+
+    // --------------------------------------------------------------------------
+    // 1. Tagging New Secondaries at Creation
+    // --------------------------------------------------------------------------
+    const std::vector<const G4Track*>* secondaries = uStep->GetSecondaryInCurrentStep();
+    if (secondaries && secondaries->size() > 0) {
+        G4VProcess* process = const_cast<G4VProcess*>(postStepPoint->GetProcessDefinedStep());
+        if (process) {
+            G4int tZ = 0;
+            G4int tA = 0;
+            G4int interactionID = 0;
+
+            trackinfo* parentInfo = dynamic_cast<trackinfo*>(track->GetUserInformation());
+            if (parentInfo) {
+                tZ = parentInfo->GetTargetZ();
+                tA = parentInfo->GetTargetA();
+                interactionID = parentInfo->GetInteractionID();
+            }
+
+            G4HadronicProcess* hproc = dynamic_cast<G4HadronicProcess*>(process);
+            if (hproc) {
+                const G4Nucleus* nucleus = hproc->GetTargetNucleus();
+                if (nucleus) {
+                    interactionID = G4EventManager::GetEventManager()->GetConstCurrentEvent()->GetEventID() * 100000 + track->GetTrackID() * 1000 + track->GetCurrentStepNumber();
+                    tZ = nucleus->GetZ_asInt();
+                    tA = nucleus->GetA_asInt();
+                }
+            }
+
+            for (auto sec : *secondaries) {
+                G4Track* modifiableTrack = const_cast<G4Track*>(sec);
+                if (!modifiableTrack->GetUserInformation()) {
+                    modifiableTrack->SetUserInformation(new trackinfo(tZ, tA, interactionID));
+                }
+            }
+        }
+    }
+
+    // --------------------------------------------------------------------------
+    // 2. Phase Space Scoring on Outer Boundary
+    // --------------------------------------------------------------------------
+    G4VPhysicalVolume* prePhys = preStepPoint->GetPhysicalVolume();
+    G4VPhysicalVolume* postPhys = postStepPoint->GetPhysicalVolume();
+    
+    if (!prePhys || !postPhys) return;
+
+    // This strictly captures particles the moment they cross the target's exterior boundary into the world.
+    if (prePhys->GetLogicalVolume() == pOuterTarget && postPhys->GetLogicalVolume() == pWorld) {
+        G4double zLimit = SharedParams::targetHalfLength;
+        G4ThreeVector pos = postStepPoint->GetPosition();
+    
+        // If the absolute Z position is near the end caps, ignore it
+        if (std::abs(pos.z()) > (zLimit - 0.01 * mm)) {
+            return; // Exited through a cap, do not score
+        }
+        G4int pdg = track->GetDefinition()->GetPDGEncoding();
+        
+        // Score protons (2212), neutrons (2112), gammas (22)
+        if (pdg == 2212 || pdg == 2112 || pdg == 22) {
+            
+            G4ThreeVector pos = postStepPoint->GetPosition();
+            G4String processName = track->GetCreatorProcess() ? track->GetCreatorProcess()->GetProcessName() : "Primary";
+            G4double birthEnergy = track->GetVertexKineticEnergy() / MeV;
+            G4int tZ = 0;
+            G4int tA = 0;
+            G4int interactionID = 0;
+
+            trackinfo* info = dynamic_cast<trackinfo*>(track->GetUserInformation());
+            if (info) {
+                tZ = info->GetTargetZ();
+                tA = info->GetTargetA();
+                interactionID = info->GetInteractionID();
+            }
+
+            auto analysisManager = G4AnalysisManager::Instance();
+            
+            analysisManager->FillNtupleIColumn(0, G4EventManager::GetEventManager()->GetConstCurrentEvent()->GetEventID());
+            analysisManager->FillNtupleIColumn(1, pdg);
+            analysisManager->FillNtupleDColumn(2, track->GetKineticEnergy() / MeV);
+            analysisManager->FillNtupleDColumn(3, pos.x() / cm);
+            analysisManager->FillNtupleDColumn(4, pos.y() / cm);
+            analysisManager->FillNtupleDColumn(5, pos.z() / cm);
+            
+            G4ThreeVector mom = track->GetMomentumDirection();
+            analysisManager->FillNtupleDColumn(6, mom.x());
+            analysisManager->FillNtupleDColumn(7, mom.y());
+            analysisManager->FillNtupleDColumn(8, mom.z());
+            analysisManager->FillNtupleDColumn(9, track->GetGlobalTime() / ns);
+            
+            analysisManager->FillNtupleDColumn(10, birthEnergy);
+            analysisManager->FillNtupleSColumn(11, processName);
+            analysisManager->FillNtupleIColumn(12, tZ);
+            analysisManager->FillNtupleIColumn(13, tA);
+            analysisManager->FillNtupleIColumn(14, interactionID);
+            
+            analysisManager->AddNtupleRow(0);
+        }
+        track->SetTrackStatus(fStopAndKill);
+    }
+}
+end of File: ./PGCreationStep1/sources/stepaction.cpp
+
+start of File: ./sharedFiles/shared_params.h
+#pragma once
+#include "G4SystemOfUnits.hh"
+#include <string>
+#include <unistd.h> // Required for getcwd()
+
+namespace SharedParams {
+    // Target Geometry
+    constexpr G4double targetRadius =  3.0 * cm;
+    constexpr G4double targetHalfLength = 4.5 * mm;
+    
+    // Placement
+    constexpr G4double detectorLateralDistance = 5.0 * cm; 
+
+    // Dynamic Path Resolution
+    inline std::string getDynamicDataPath() {
+        // Hardcoded absolute path for the new simulation project directory
+        return "/omics/groups/OE0471/internal/m361e/master/qPaperSimulations/data/";
+    }
+
+    // Initialize the path once at runtime
+    static const std::string dataPath = getDynamicDataPath();
+}
+end of File: ./sharedFiles/shared_params.h
+
 start of File: ./sharedFiles/shared_materials.h
 #pragma once
 #include "G4Material.hh"
@@ -171,6 +1559,97 @@ namespace SharedMaterials {
 
         G4Material* sb3 = new G4Material("SB3_cortical_bone", 1.823*g/cm3, 6);
         sb3->AddElement(elH, 0.03410); sb3->AddElement(elC, 0.31410); sb3->AddElement(elN, 0.01840); sb3->AddElement(elO, 0.36500); sb3->AddElement(elCl, 0.00040); sb3->AddElement(elCa, 0.26810);
+        
+        // new calibration materials
+        //         Mixing AP6_adipose and BRN_SR2_brain with weight fractions 50.00% and 50.00% respectively.
+        // --- Mix for Gammex_Cal_000 ---
+        // Target Ca achieved: 0.00000
+        // Density: 0.996 g/cm3
+        G4Material* Gammex_Cal_000 = new G4Material("Gammex_Cal_000", 0.996*g/cm3, 5);
+        Gammex_Cal_000->AddElement(elN, 0.01970);
+        Gammex_Cal_000->AddElement(elCl, 0.00105);
+        Gammex_Cal_000->AddElement(elO, 0.15565);
+        Gammex_Cal_000->AddElement(elH, 0.09945);
+        Gammex_Cal_000->AddElement(elC, 0.72415);
+
+        // Mixing CB2_30_CaCO3 with 0.6270736270422386 % and CT_solid_water with 0.37292637295776143% to achieve target Ca density 0.10000 g/cm3.
+        // Mixing CB2_30_CaCO3 and CT_solid_water with weight fractions 62.71% and 37.29% respectively.
+        // --- Mix for Gammex_Cal_010 ---
+        // Target Ca achieved: 0.08393
+        // Density: 1.192 g/cm3
+        G4Material* Gammex_Cal_010 = new G4Material("Gammex_Cal_010", 1.192*g/cm3, 6);
+        Gammex_Cal_010->AddElement(elN, 0.02221);
+        Gammex_Cal_010->AddElement(elCa, 0.08393);
+        Gammex_Cal_010->AddElement(elCl, 0.00121);
+        Gammex_Cal_010->AddElement(elO, 0.23469);
+        Gammex_Cal_010->AddElement(elH, 0.07172);
+        Gammex_Cal_010->AddElement(elC, 0.58624);
+
+        // Mixing CB2_50_CaCO3 with 0.3885837105176085 % and B200_bone_mineral with 0.6114162894823916% to achieve target Ca density 0.17000 g/cm3.
+        // Mixing CB2_50_CaCO3 and B200_bone_mineral with weight fractions 38.86% and 61.14% respectively.
+        // --- Mix for Gammex_Cal_017 ---
+        // Target Ca achieved: 0.13203
+        // Density: 1.288 g/cm3
+        G4Material* Gammex_Cal_017 = new G4Material("Gammex_Cal_017", 1.288*g/cm3, 7);
+        Gammex_Cal_017->AddElement(elN, 0.01801);
+        Gammex_Cal_017->AddElement(elCa, 0.13203);
+        Gammex_Cal_017->AddElement(elCl, 0.00098);
+        Gammex_Cal_017->AddElement(elP, 0.01981);
+        Gammex_Cal_017->AddElement(elO, 0.26885);
+        Gammex_Cal_017->AddElement(elH, 0.05919);
+        Gammex_Cal_017->AddElement(elC, 0.50113);
+
+        // Mixing SB3_cortical_bone with 0.6022060427169597 % and Solid_water_M457 with 0.39779395728304034% to achieve target Ca density 0.24000 g/cm3.
+        // Mixing SB3_cortical_bone and Solid_water_M457 with weight fractions 60.22% and 39.78% respectively.
+        // --- Mix for Gammex_Cal_024 ---
+        // Target Ca achieved: 0.17064
+        // Density: 1.406 g/cm3
+        G4Material* Gammex_Cal_024 = new G4Material("Gammex_Cal_024", 1.406*g/cm3, 6);
+        Gammex_Cal_024->AddElement(elN, 0.02067);
+        Gammex_Cal_024->AddElement(elCa, 0.17062);
+        Gammex_Cal_024->AddElement(elCl, 0.00080);
+        Gammex_Cal_024->AddElement(elO, 0.29898);
+        Gammex_Cal_024->AddElement(elH, 0.05243);
+        Gammex_Cal_024->AddElement(elC, 0.45650);
+
+        // Mixing SB3_cortical_bone with 0.7696969864155073 % and AP6_adipose with 0.23030301358449268% to achieve target Ca density 0.31000 g/cm3.
+        // Mixing SB3_cortical_bone and AP6_adipose with weight fractions 76.97% and 23.03% respectively.
+        // --- Mix for Gammex_Cal_031 ---
+        // Target Ca achieved: 0.20636
+        // Density: 1.502 g/cm3
+        G4Material* Gammex_Cal_031 = new G4Material("Gammex_Cal_031", 1.502*g/cm3, 6);
+        Gammex_Cal_031->AddElement(elN, 0.01934);
+        Gammex_Cal_031->AddElement(elCa, 0.20634);
+        Gammex_Cal_031->AddElement(elCl, 0.00061);
+        Gammex_Cal_031->AddElement(elO, 0.31839);
+        Gammex_Cal_031->AddElement(elH, 0.04711);
+        Gammex_Cal_031->AddElement(elC, 0.40822);
+
+        // Mixing SB3_cortical_bone with 0.4210874104419222 % and CB2_50_CaCO3 with 0.5789125895580778% to achieve target Ca density 0.38000 g/cm3.
+        // Mixing SB3_cortical_bone and CB2_50_CaCO3 with weight fractions 42.11% and 57.89% respectively.
+        // --- Mix for Gammex_Cal_038 ---
+        // Target Ca achieved: 0.22879
+        // Density: 1.661 g/cm3
+        G4Material* Gammex_Cal_038 = new G4Material("Gammex_Cal_038", 1.661*g/cm3, 6);
+        Gammex_Cal_038->AddElement(elN, 0.01655);
+        Gammex_Cal_038->AddElement(elCa, 0.22878);
+        Gammex_Cal_038->AddElement(elCl, 0.00063);
+        Gammex_Cal_038->AddElement(elO, 0.33888);
+        Gammex_Cal_038->AddElement(elH, 0.04197);
+        Gammex_Cal_038->AddElement(elC, 0.37319);
+
+        // Mixing SB3_cortical_bone with 0.9504306816722121 % and Solid_water_M457 with 0.04956931832778788% to achieve target Ca density 0.45000 g/cm3.
+        // Mixing SB3_cortical_bone and Solid_water_M457 with weight fractions 95.04% and 4.96% respectively.
+        // --- Mix for Gammex_Cal_045 ---
+        // Target Ca achieved: 0.25596
+        // Density: 1.758 g/cm3
+        G4Material* Gammex_Cal_045 = new G4Material("Gammex_Cal_045", 1.758*g/cm3, 6);
+        Gammex_Cal_045->AddElement(elN, 0.01868);
+        Gammex_Cal_045->AddElement(elCa, 0.25593);
+        Gammex_Cal_045->AddElement(elCl, 0.00045);
+        Gammex_Cal_045->AddElement(elO, 0.35674);
+        Gammex_Cal_045->AddElement(elH, 0.03638);
+        Gammex_Cal_045->AddElement(elC, 0.33182);
     }
 
     inline G4Material* GetTargetMaterial(const G4String& matName) {
@@ -183,43 +1662,7 @@ namespace SharedMaterials {
 }
 end of File: ./sharedFiles/shared_materials.h
 
-start of File: ./sharedFiles/shared_params.h
-#pragma once
-#include "G4SystemOfUnits.hh"
-#include <string>
-#include <unistd.h> // Required for getcwd()
-
-namespace SharedParams {
-    // Target Geometry
-    constexpr G4double targetRadius =  3.0 * cm;
-    constexpr G4double targetHalfLength = 4.5 * mm;
-    
-    // Placement
-    constexpr G4double detectorLateralDistance = 5.0 * cm; 
-
-    // Dynamic Path Resolution
-    inline std::string getDynamicDataPath() {
-        char cwd[1024];
-        if (getcwd(cwd, sizeof(cwd)) != nullptr) {
-            std::string path(cwd);
-            std::string target = "pMultiStepPGGenerator";
-            size_t pos = path.find(target);
-            
-            if (pos != std::string::npos) {
-                // Slice the path up to the end of the target folder name and append /data/
-                return path.substr(0, pos + target.length()) + "/data/";
-            }
-        }
-        // Fallback if the executable is run from completely outside the project tree
-        return "./data/"; 
-    }
-
-    // Initialize the path once at runtime
-    static const std::string dataPath = getDynamicDataPath();
-}
-end of File: ./sharedFiles/shared_params.h
-
-start of File: ./PGCreationStep1/main.cpp
+start of File: ./SimulationOfSetupStep2/main.cpp
 //===============================================================================================
 // Std libraries
 //===============================================================================================
@@ -227,6 +1670,8 @@ start of File: ./PGCreationStep1/main.cpp
 #include <set>
 #include <chrono>
 #include <fstream>
+#include <functional>
+#include <string>
 
 //===============================================================================================
 // Geant libraries
@@ -246,38 +1691,39 @@ start of File: ./PGCreationStep1/main.cpp
 #include "geometry.h"
 #include "actions.h"
 #include "physics.h"
-#include "../../sharedFiles/shared_materials.h"
+#include "../../sharedFiles/shared_materials.h" // Adjust path for Step 2: "../sharedFiles..."
 #include "../../sharedFiles/shared_params.h"
 
-//===============================================================================================
-// Main code
-//===============================================================================================
 int main(int argc, char** argv) {
-    uint16_t sessionType = 0; uint16_t nThreads = 1; uint16_t nRuns = 0;
-    int uSeed = 0; uint64_t nHistories = 2.5e6;
+    uint16_t sessionType = 0; 
+    uint16_t nThreads = 1; 
+    uint16_t runNum = 0;
+    int uSeed = 12; 
+    uint64_t nHistories = 2.5e6;
     std::string macroFile = "";
     
     // Default setup
     std::string targetMaterial = "WaterCa0"; 
-    std::string stepName = "PhaseSpace";
+    std::string stepName = "PhaseSpace"; // Change to "Final" for Step 2
 
     int i = 0;
     while(++i < argc) {
         std::string opt(argv[i]);
         if (opt.compare("-ui") == 0) sessionType = std::stoi(argv[++i]);
         else if (opt.compare("-n") == 0) nThreads = std::stoi(argv[++i]);
-        else if (opt.compare("-runs") == 0) nRuns = std::stoi(argv[++i]);
+        else if (opt.compare("-run") == 0) runNum = std::stoi(argv[++i]);
         else if (opt.compare("-seed") == 0) uSeed = std::stoi(argv[++i]);        
         else if (opt.compare("-p") == 0) nHistories = std::stoull(argv[++i]);
         else if (opt == "-macro") macroFile = argv[++i];
         else if (opt == "-mat") targetMaterial = argv[++i];
     }
 
-    // Build and verify material
     SharedMaterials::BuildAllMaterials();
     if (!SharedMaterials::GetTargetMaterial(targetMaterial)) {
         std::cerr << "FATAL: Material '" << targetMaterial << "' not found." << std::endl; return 1;
     }
+
+    // NOTE: Keep the phase space integrity check here for Step 2, remove for Step 1.
 
     #ifdef G4MULTITHREADED
         if (nThreads == 0) nThreads = G4Thread::hardware_concurrency();
@@ -304,46 +1750,144 @@ int main(int argc, char** argv) {
         uiExecutive = new G4UIExecutive(argc, argv, "qt");
         if (!macroFile.empty()) uiManager->ApplyCommand("/control/execute " + macroFile);
         uiExecutive->SessionStart();
-        
     } else {
         if (sessionType == 2) {
             uiExecutive = new G4UIExecutive(argc, argv, "tcsh");
             if (!macroFile.empty()) uiManager->ApplyCommand("/control/execute " + macroFile);
+            uiExecutive->SessionStart(); // Added missing SessionStart for tcsh
         }
-        const uint64_t MAX_PER_RUN = 1000000000ULL;
-        for (size_t irun = 0; irun < nRuns; ++irun) {
-            uint64_t remainingHistories = nHistories; uint64_t chunkIndex = 0;
-            while (remainingHistories > 0) {
-                uint64_t chunk = (remainingHistories > MAX_PER_RUN) ? MAX_PER_RUN : remainingHistories;
-                G4Random::setTheSeed(irun + 1 + uSeed*nRuns + chunkIndex);
-                runManager->SetRunIDCounter((irun * 10000) + chunkIndex);
-                runManager->BeamOn(chunk);
-                remainingHistories -= chunk; chunkIndex++;
-            }
+
+        const uint64_t MAX_PER_RUN = 2000000000ULL;
+        nHistories = 2000000000;
+        if (nHistories > MAX_PER_RUN) {
+            std::cerr << "Error: Number of histories (" << nHistories << ") exceeds the maximum allowed per run (" << MAX_PER_RUN << ")." << std::endl;
+            return 1;
         }
+
+        // Deterministic Seed Generation
+        std::string seedString = targetMaterial + "_Seed" + std::to_string(uSeed) + "_Run" + std::to_string(runNum);
+        std::hash<std::string> hasher;
+        long deterministicSeed = static_cast<long>(hasher(seedString) % 900000000); 
+
+        G4Random::setTheSeed(deterministicSeed);
+        std::cout << "Starting run " << runNum << " with " << nHistories << " histories (seed: " << G4Random::getTheSeed() << ")" << std::endl;
+
+        runManager->SetRunIDCounter(runNum);
+        runManager->BeamOn(nHistories);
     }
 
     auto end = std::chrono::steady_clock::now();
     G4cout << "elapsed time: " << std::chrono::duration_cast<std::chrono::seconds>(end - start).count() << " s" << G4endl;
 
-    delete runManager; delete visManager; if (uiExecutive) delete uiExecutive;
+    delete runManager; 
+    delete visManager; 
+    if (uiExecutive) delete uiExecutive;
 
-    // DYNAMIC MERGING
-    std::cout << "\nMerging chunked ROOT files in data directory..." << std::endl;
-    std::string baseName = stepName + "_" + targetMaterial;
-    std::string mergeCmd = "hadd -f " + SharedParams::dataPath + baseName + ".root " + SharedParams::dataPath+ baseName + "_run*.root";
-    if (std::system(mergeCmd.c_str()) == 0) {
-        std::cout << "Merge successful. Removing temporary files..." << std::endl;
-        int rmStatus = std::system(("rm " + SharedParams::dataPath + baseName + "_run*.root").c_str());
-        (void)rmStatus; // Suppress the unused-result warning
-    } else {
-        std::cerr << "Warning: 'hadd' merge failed." << std::endl;
-    }
-    std::cout << "Press Enter to exit..." << std::endl; std::cin.get();
+    std::cout << "Simulation completed!" << std::endl;
+    return 0;
 }
-end of File: ./PGCreationStep1/main.cpp
+end of File: ./SimulationOfSetupStep2/main.cpp
 
-start of File: ./PGCreationStep1/headers/physics.h
+start of File: ./SimulationOfSetupStep2/headers/stackaction.h
+#pragma once
+
+//===============================================================================================
+// geant libraries
+//===============================================================================================
+
+#include "G4UserStackingAction.hh"
+#include "G4Track.hh"
+#include "G4LogicalVolume.hh"
+
+//===============================================================================================
+// class prototype
+//===============================================================================================
+
+class stackaction: public G4UserStackingAction
+{
+    public:
+        stackaction();
+        virtual ~stackaction() override;
+        
+        virtual G4ClassificationOfNewTrack ClassifyNewTrack(const G4Track* utrack) override;
+
+    private:
+        const G4ParticleDefinition* uparticle;
+        
+        G4LogicalVolume* pInnerTarget;
+        G4LogicalVolume* pOuterTarget;
+        bool pointersInitialized;
+};
+end of File: ./SimulationOfSetupStep2/headers/stackaction.h
+
+start of File: ./SimulationOfSetupStep2/headers/actions.h
+
+
+#pragma once
+#include "G4VUserActionInitialization.hh"
+#include "generator.h"
+#include "runaction.h"
+#include "eventaction.h"
+#include "stepaction.h"
+#include "stackaction.h"
+#include "G4String.hh"
+
+class actions : public G4VUserActionInitialization {
+    public:
+        actions(G4String material, G4String step);
+        virtual void Build() const override;
+        virtual void BuildForMaster() const override;
+    private:
+        G4String uMaterial;
+        G4String uStep;
+};
+end of File: ./SimulationOfSetupStep2/headers/actions.h
+
+start of File: ./SimulationOfSetupStep2/headers/generator.h
+#pragma once
+
+#include "G4VUserPrimaryGeneratorAction.hh"
+#include "G4ParticleGun.hh"
+#include "G4Event.hh"
+#include "G4SystemOfUnits.hh"
+#include "G4ThreeVector.hh"
+#include "G4AutoLock.hh"
+#include <vector>
+#include <memory>
+#include <atomic>
+
+struct PhaseSpaceParticle {
+    G4int pdg;
+    G4double energy;
+    G4ThreeVector position;
+    G4ThreeVector direction;
+    G4double time;
+};
+
+class generator : public G4VUserPrimaryGeneratorAction {    
+    public:
+        generator(G4String materialName);
+        virtual ~generator() override;
+
+        virtual void GeneratePrimaries(G4Event* anEvent) override;
+
+        G4double getIEnergy() { return energy; }
+        G4ThreeVector getIPosition() { return position; }
+        G4ThreeVector getIDirection() { return direction; }
+
+    private:
+        G4ParticleGun* uParticleGun;
+        G4double energy = -1;
+        G4ThreeVector position, direction;
+
+        // Static members shared across all threads
+        static G4Mutex mutex;
+        static std::shared_ptr<std::vector<PhaseSpaceParticle>> sharedPhaseSpaceData;
+        static std::atomic<uint64_t> globalAtomicIndex;
+};
+end of File: ./SimulationOfSetupStep2/headers/generator.h
+
+start of File: ./SimulationOfSetupStep2/headers/pworld.h
 #pragma once
 
 //===============================================================================================
@@ -354,74 +1898,32 @@ start of File: ./PGCreationStep1/headers/physics.h
 // geant libraries
 //===============================================================================================
 
-#include "G4VUserPhysicsList.hh"
-#include "G4VModularPhysicsList.hh"
+#include "G4VUserParallelWorld.hh"
 
-#include "G4UserLimits.hh"
-
-#include "G4EmStandardPhysics_option4.hh"
-#include "G4EmExtraPhysics.hh"
-#include "G4EmParameters.hh"
-
-#include "G4DecayPhysics.hh"
-#include "G4RadioactiveDecayPhysics.hh"
-
-#include "G4HadronElasticPhysicsHP.hh"
-#include "G4HadronPhysicsQGSP_BIC_HP.hh"
-#include "G4HadronPhysicsINCLXX.hh"
-
-#include "G4StoppingPhysics.hh"
-
-#include "G4IonElasticPhysics.hh"
-#include "G4IonPhysics.hh"
-
-#include "G4BosonConstructor.hh"
-#include "G4LeptonConstructor.hh"
-#include "G4MesonConstructor.hh"
-#include "G4BaryonConstructor.hh"
-#include "G4IonConstructor.hh"
-#include "G4ShortLivedConstructor.hh"
-
-#include "G4StepLimiter.hh"
-#include "G4ProcessManager.hh"
-
-#include "G4SystemOfUnits.hh"
+#include "G4VPhysicalVolume.hh"
+#include "G4LogicalVolume.hh"
 
 //===============================================================================================
 // user libraries
 //===============================================================================================
 
-#pragma once
-
 //===============================================================================================
-// Class Prototype
+// class prototype
 //===============================================================================================
 
-class physics : public G4VModularPhysicsList {
+class pworld : public G4VUserParallelWorld
+{
     public:
-        physics();
-        virtual ~physics() override;
-            
-        virtual void  SetCuts () override;          // setting a range cut value for all particles
-        virtual void  ConstructProcess() override;  // construct processes and register them to particles
-        virtual void  ConstructParticle() override; // construction of particles
+        pworld(G4String uname);
+        virtual ~pworld() override;
 
-    private:    
-        const G4int uVerbose = 0;
-
-        G4VPhysicsConstructor *plEM = nullptr;
-        G4VPhysicsConstructor *plDecay = nullptr;
-        G4VPhysicsConstructor *plRadioactiveDecay = nullptr;
-        G4VPhysicsConstructor *plHadronElastic = nullptr;
-        G4VPhysicsConstructor *plHadronInelastic = nullptr;    
-        G4VPhysicsConstructor *plEMextra = nullptr;
-        G4VPhysicsConstructor *plStoppping = nullptr;
-        G4VPhysicsConstructor *plIonElastic = nullptr;
-        G4VPhysicsConstructor *plIonInelastic = nullptr;    
+    public:
+        virtual void Construct() override;
+        virtual void ConstructSD() override;
 };
-end of File: ./PGCreationStep1/headers/physics.h
+end of File: ./SimulationOfSetupStep2/headers/pworld.h
 
-start of File: ./PGCreationStep1/headers/eventaction.h
+start of File: ./SimulationOfSetupStep2/headers/eventaction.h
 #pragma once
 
 #include <unordered_map>
@@ -475,77 +1977,9 @@ class eventaction: public G4UserEventAction {
         // Stores the physical data for each unique Incident ID
         std::unordered_map<G4int, IncidentRecord> incidentData;
 };
-end of File: ./PGCreationStep1/headers/eventaction.h
+end of File: ./SimulationOfSetupStep2/headers/eventaction.h
 
-start of File: ./PGCreationStep1/headers/pworld.h
-#pragma once
-
-//===============================================================================================
-// std libraries
-//===============================================================================================
-
-//===============================================================================================
-// geant libraries
-//===============================================================================================
-
-#include "G4VUserParallelWorld.hh"
-
-#include "G4VPhysicalVolume.hh"
-#include "G4LogicalVolume.hh"
-
-//===============================================================================================
-// user libraries
-//===============================================================================================
-
-//===============================================================================================
-// class prototype
-//===============================================================================================
-
-class pworld : public G4VUserParallelWorld
-{
-    public:
-        pworld(G4String uname);
-        virtual ~pworld() override;
-
-    public:
-        virtual void Construct() override;
-        virtual void ConstructSD() override;
-};
-end of File: ./PGCreationStep1/headers/pworld.h
-
-start of File: ./PGCreationStep1/headers/stackaction.h
-#pragma once
-
-//===============================================================================================
-// geant libraries
-//===============================================================================================
-
-#include "G4UserStackingAction.hh"
-#include "G4Track.hh"
-#include "G4LogicalVolume.hh"
-
-//===============================================================================================
-// class prototype
-//===============================================================================================
-
-class stackaction: public G4UserStackingAction
-{
-    public:
-        stackaction();
-        virtual ~stackaction() override;
-        
-        virtual G4ClassificationOfNewTrack ClassifyNewTrack(const G4Track* utrack) override;
-
-    private:
-        const G4ParticleDefinition* uparticle;
-        
-        G4LogicalVolume* pInnerTarget;
-        G4LogicalVolume* pOuterTarget;
-        bool pointersInitialized;
-};
-end of File: ./PGCreationStep1/headers/stackaction.h
-
-start of File: ./PGCreationStep1/headers/geometry.h
+start of File: ./SimulationOfSetupStep2/headers/geometry.h
 #pragma once
 
 //===============================================================================================
@@ -578,6 +2012,7 @@ start of File: ./PGCreationStep1/headers/geometry.h
 //===============================================================================================
 // class prototype
 //===============================================================================================
+
 class geometry : public G4VUserDetectorConstruction {
     public:
         geometry(G4String targetMatName);
@@ -603,175 +2038,9 @@ class geometry : public G4VUserDetectorConstruction {
         std::vector<G4LogicalVolume*> lPrimary; std::vector<G4LogicalVolume*> lACShield; std::vector<G4LogicalVolume*> lCollimator;
         G4int nDetectors; G4RotationMatrix* rotDetector; std::vector<G4VisAttributes*> visAttributes;
 };
-end of File: ./PGCreationStep1/headers/geometry.h
+end of File: ./SimulationOfSetupStep2/headers/geometry.h
 
-start of File: ./PGCreationStep1/headers/run.h
-#pragma once
-
-//===============================================================================================
-// std libraries
-//===============================================================================================
-
-//===============================================================================================
-// geant libraries
-//===============================================================================================
-
-#include "G4Run.hh"
-
-//===============================================================================================
-// user libraries
-//===============================================================================================
-
-//===============================================================================================
-// class prototype
-//===============================================================================================
-
-class run : public G4Run {
-    public:
-        run();
-        virtual ~run() override;
-
-    private:
-};
-end of File: ./PGCreationStep1/headers/run.h
-
-start of File: ./PGCreationStep1/headers/actions.h
-#pragma once
-#include "G4VUserActionInitialization.hh"
-#include "generator.h"
-#include "runaction.h"
-#include "eventaction.h"
-#include "stepaction.h"
-#include "stackaction.h"
-#include "G4String.hh"
-
-class actions : public G4VUserActionInitialization {
-    public:
-        actions(G4String material, G4String step);
-        virtual void Build() const override;
-        virtual void BuildForMaster() const override;
-    private:
-        G4String uMaterial;
-        G4String uStep;
-};
-end of File: ./PGCreationStep1/headers/actions.h
-
-start of File: ./PGCreationStep1/headers/generator.h
-#pragma once
-
-//===============================================================================================
-// std libraries
-//===============================================================================================
-
-//===============================================================================================
-// geant libraries
-//===============================================================================================
-
-#include "G4VUserPrimaryGeneratorAction.hh"
-
-#include "G4ParticleGun.hh"
-#include "G4GeneralParticleSource.hh"
-#include "G4ParticleTable.hh"
-
-#include "G4SystemOfUnits.hh"
-#include "G4PhysicalVolumeStore.hh"
-#include "G4VPhysicalVolume.hh"
-
-//===============================================================================================
-// user libraries
-//===============================================================================================
-
-//===============================================================================================
-// Class Prototype
-//===============================================================================================
-
-
-class generator : public G4VUserPrimaryGeneratorAction {    
-    public:
-        generator();
-        virtual ~generator() override;
-
-        virtual void GeneratePrimaries(G4Event* anEvent) override;
-
-        G4double getIEnergy() { return energy; }
-        G4ThreeVector getIPosition() { return position; }
-        G4ThreeVector getIDirection() { return direction; }
-
-    private:
-        G4GeneralParticleSource *uParticleGPS;
-        G4double energy = -1;
-        G4ThreeVector position, direction;
-};
-end of File: ./PGCreationStep1/headers/generator.h
-
-start of File: ./PGCreationStep1/headers/stepaction.h
-#pragma once
-
-//===============================================================================================
-// geant libraries
-//===============================================================================================
-
-#include "G4RunManager.hh"
-#include "G4UserSteppingAction.hh"
-#include "G4Step.hh"
-
-#include "G4Gamma.hh"
-#include "G4Proton.hh"
-#include "G4LogicalVolume.hh"
-#include "G4HadronicProcess.hh"
-#include "G4Nucleus.hh"
-
-//===============================================================================================
-// user libraries
-//===============================================================================================
-
-#include "eventaction.h"
-#include "trackinfo.h"
-
-//===============================================================================================
-// class prototype
-//===============================================================================================
-
-class stepaction: public G4UserSteppingAction
-{
-    public:
-        stepaction(eventaction *eventaction);
-        virtual ~stepaction() override;
-
-        virtual void UserSteppingAction(const G4Step*) override;
-
-    private:
-        eventaction *ueventaction;
-        
-        G4LogicalVolume* pOuterTarget;
-        G4LogicalVolume* pWorld;
-        bool pointersInitialized;
-};
-end of File: ./PGCreationStep1/headers/stepaction.h
-
-start of File: ./PGCreationStep1/headers/trackinfo.h
-#pragma once
-#include "G4VUserTrackInformation.hh"
-
-class trackinfo : public G4VUserTrackInformation {
-    public:
-        trackinfo(G4int tz, G4int ta, G4int intID)
-            : targetZ(tz), targetA(ta), interactionID(intID) {}
-        virtual ~trackinfo() override {}
-        virtual void Print() const override {}
-
-        G4int GetTargetZ() const { return targetZ; }
-        G4int GetTargetA() const { return targetA; }
-        G4int GetInteractionID() const { return interactionID; }
-
-    private:
-        G4int targetZ;
-        G4int targetA;
-        G4int interactionID;
-};
-end of File: ./PGCreationStep1/headers/trackinfo.h
-
-start of File: ./PGCreationStep1/headers/runaction.h
+start of File: ./SimulationOfSetupStep2/headers/runaction.h
 #pragma once
 #include "G4RunManager.hh"
 #include "G4UserRunAction.hh"
@@ -795,924 +2064,7 @@ class runaction: public G4UserRunAction {
         G4String uMaterial;
         G4String uStep;
 };
-end of File: ./PGCreationStep1/headers/runaction.h
-
-start of File: ./PGCreationStep1/sources/stepaction.cpp
-#include "stepaction.h"
-#include "G4SystemOfUnits.hh"
-#include "G4LogicalVolumeStore.hh"
-#include "G4EventManager.hh"
-#include "G4NistManager.hh"
-#include "G4Nucleus.hh"
-#include "G4HadronicProcess.hh"
-#include "G4AnalysisManager.hh"
-#include "trackinfo.h"
-#include "../../sharedFiles/shared_params.h"
-
-stepaction::stepaction(eventaction *eventaction): 
-G4UserSteppingAction(), ueventaction(eventaction), pOuterTarget(nullptr), pWorld(nullptr), pointersInitialized(false){}
-
-stepaction::~stepaction(){}
-
-void stepaction::UserSteppingAction(const G4Step *uStep){
-    G4Track* track = uStep->GetTrack();
-
-    // 15-minute time cutoff
-    if (track->GetGlobalTime() > 900.0 * s) {
-        track->SetTrackStatus(fStopAndKill);
-        return;
-    }
-
-    if (!pointersInitialized) {
-        pOuterTarget = G4LogicalVolumeStore::GetInstance()->GetVolume("lTarget", false);
-        pWorld = G4LogicalVolumeStore::GetInstance()->GetVolume("lWorld", false);
-        pointersInitialized = true;
-    }
-
-    G4StepPoint* preStepPoint  = uStep->GetPreStepPoint();
-    G4StepPoint* postStepPoint = uStep->GetPostStepPoint();
-
-    // --------------------------------------------------------------------------
-    // 1. Tagging New Secondaries at Creation
-    // --------------------------------------------------------------------------
-    const std::vector<const G4Track*>* secondaries = uStep->GetSecondaryInCurrentStep();
-    if (secondaries && secondaries->size() > 0) {
-        G4VProcess* process = const_cast<G4VProcess*>(postStepPoint->GetProcessDefinedStep());
-        if (process) {
-            G4int tZ = 0;
-            G4int tA = 0;
-            G4int interactionID = 0;
-
-            trackinfo* parentInfo = dynamic_cast<trackinfo*>(track->GetUserInformation());
-            if (parentInfo) {
-                tZ = parentInfo->GetTargetZ();
-                tA = parentInfo->GetTargetA();
-                interactionID = parentInfo->GetInteractionID();
-            }
-
-            G4HadronicProcess* hproc = dynamic_cast<G4HadronicProcess*>(process);
-            if (hproc) {
-                const G4Nucleus* nucleus = hproc->GetTargetNucleus();
-                if (nucleus) {
-                    interactionID = G4EventManager::GetEventManager()->GetConstCurrentEvent()->GetEventID() * 100000 + track->GetTrackID() * 1000 + track->GetCurrentStepNumber();
-                    tZ = nucleus->GetZ_asInt();
-                    tA = nucleus->GetA_asInt();
-                }
-            }
-
-            for (auto sec : *secondaries) {
-                G4Track* modifiableTrack = const_cast<G4Track*>(sec);
-                if (!modifiableTrack->GetUserInformation()) {
-                    modifiableTrack->SetUserInformation(new trackinfo(tZ, tA, interactionID));
-                }
-            }
-        }
-    }
-
-    // --------------------------------------------------------------------------
-    // 2. Phase Space Scoring on Outer Boundary
-    // --------------------------------------------------------------------------
-    G4VPhysicalVolume* prePhys = preStepPoint->GetPhysicalVolume();
-    G4VPhysicalVolume* postPhys = postStepPoint->GetPhysicalVolume();
-    
-    if (!prePhys || !postPhys) return;
-
-    // This strictly captures particles the moment they cross the target's exterior boundary into the world.
-    if (prePhys->GetLogicalVolume() == pOuterTarget && postPhys->GetLogicalVolume() == pWorld) {
-        G4double zLimit = SharedParams::targetHalfLength;
-        G4ThreeVector pos = postStepPoint->GetPosition();
-    
-        // If the absolute Z position is near the end caps, ignore it
-        if (std::abs(pos.z()) > (zLimit - 0.01 * mm)) {
-            return; // Exited through a cap, do not score
-        }
-        G4int pdg = track->GetDefinition()->GetPDGEncoding();
-        
-        // Score protons (2212), neutrons (2112), gammas (22)
-        if (pdg == 2212 || pdg == 2112 || pdg == 22) {
-            
-            G4ThreeVector pos = postStepPoint->GetPosition();
-            G4String processName = track->GetCreatorProcess() ? track->GetCreatorProcess()->GetProcessName() : "Primary";
-            G4double birthEnergy = track->GetVertexKineticEnergy() / MeV;
-            G4int tZ = 0;
-            G4int tA = 0;
-            G4int interactionID = 0;
-
-            trackinfo* info = dynamic_cast<trackinfo*>(track->GetUserInformation());
-            if (info) {
-                tZ = info->GetTargetZ();
-                tA = info->GetTargetA();
-                interactionID = info->GetInteractionID();
-            }
-
-            auto analysisManager = G4AnalysisManager::Instance();
-            
-            analysisManager->FillNtupleIColumn(0, G4EventManager::GetEventManager()->GetConstCurrentEvent()->GetEventID());
-            analysisManager->FillNtupleIColumn(1, pdg);
-            analysisManager->FillNtupleDColumn(2, track->GetKineticEnergy() / MeV);
-            analysisManager->FillNtupleDColumn(3, pos.x() / cm);
-            analysisManager->FillNtupleDColumn(4, pos.y() / cm);
-            analysisManager->FillNtupleDColumn(5, pos.z() / cm);
-            
-            G4ThreeVector mom = track->GetMomentumDirection();
-            analysisManager->FillNtupleDColumn(6, mom.x());
-            analysisManager->FillNtupleDColumn(7, mom.y());
-            analysisManager->FillNtupleDColumn(8, mom.z());
-            analysisManager->FillNtupleDColumn(9, track->GetGlobalTime() / ns);
-            
-            analysisManager->FillNtupleDColumn(10, birthEnergy);
-            analysisManager->FillNtupleSColumn(11, processName);
-            analysisManager->FillNtupleIColumn(12, tZ);
-            analysisManager->FillNtupleIColumn(13, tA);
-            analysisManager->FillNtupleIColumn(14, interactionID);
-            
-            analysisManager->AddNtupleRow(0);
-        }
-        track->SetTrackStatus(fStopAndKill);
-    }
-}
-end of File: ./PGCreationStep1/sources/stepaction.cpp
-
-start of File: ./PGCreationStep1/sources/run.cpp
-//===============================================================================================
-// std libraries
-//===============================================================================================
-
-//===============================================================================================
-// geant libraries
-//===============================================================================================
-
-//===============================================================================================
-// user libraries
-//===============================================================================================
-
-#include "run.h"
-
-//===============================================================================================
-// de/constructor
-//===============================================================================================
-
-
-run::run():
-G4Run(){  
-}
-
-run::~run(){  
-}
-
-end of File: ./PGCreationStep1/sources/run.cpp
-
-start of File: ./PGCreationStep1/sources/runaction.cpp
-#include "runaction.h"
-#include "../../sharedFiles/shared_params.h"
-
-runaction::runaction(G4String material, G4String step) : G4UserRunAction(), uMaterial(material), uStep(step) {
-    auto analysisManager = G4AnalysisManager::Instance();
-    #ifdef G4MULTITHREADED
-        analysisManager->SetNtupleMerging(false);
-    #endif
-    analysisManager->SetDefaultFileType("root");
-    analysisManager->SetVerboseLevel(1);
-    
-    analysisManager->CreateNtuple("PhaseSpace", "Scored Particles on Outer Cylinder");
-    analysisManager->CreateNtupleIColumn("eventid");          // 0
-    analysisManager->CreateNtupleIColumn("pdg");              // 1
-    analysisManager->CreateNtupleDColumn("energy_MeV");       // 2
-    analysisManager->CreateNtupleDColumn("pos_x_cm");         // 3
-    analysisManager->CreateNtupleDColumn("pos_y_cm");         // 4
-    analysisManager->CreateNtupleDColumn("pos_z_cm");         // 5
-    analysisManager->CreateNtupleDColumn("mom_dir_x");        // 6
-    analysisManager->CreateNtupleDColumn("mom_dir_y");        // 7
-    analysisManager->CreateNtupleDColumn("mom_dir_z");        // 8
-    analysisManager->CreateNtupleDColumn("time_ns");          // 9
-    
-    // New parameters
-    analysisManager->CreateNtupleDColumn("creation_energy_MeV"); // 10
-    analysisManager->CreateNtupleSColumn("creation_process");    // 11
-    analysisManager->CreateNtupleIColumn("target_Z");            // 12
-    analysisManager->CreateNtupleIColumn("target_A");            // 13
-    analysisManager->CreateNtupleIColumn("interaction_id");      // 14
-    
-    analysisManager->FinishNtuple(0);
-}
-
-runaction::~runaction(){
-}
-
-G4Run* runaction::GenerateRun() {
-    return new run;
-}
-void runaction::BeginOfRunAction(const G4Run* urun){   
-    auto analysisManager = G4AnalysisManager::Instance();
-    G4String fileName = SharedParams::dataPath + uStep + "_" + uMaterial + "_run" + std::to_string(urun->GetRunID()) + ".root";
-    analysisManager->OpenFile(fileName);
-}
-
-void runaction::EndOfRunAction(const G4Run* urun){
-    auto analysisManager = G4AnalysisManager::Instance();
-    analysisManager->Write();
-    analysisManager->CloseFile();
-}
-end of File: ./PGCreationStep1/sources/runaction.cpp
-
-start of File: ./PGCreationStep1/sources/actions.cpp
-#include "actions.h"
-
-actions::actions(G4String material, G4String step) : uMaterial(material), uStep(step) {}
-
-void actions::BuildForMaster() const{
-    runaction *uRunAction = new runaction(uMaterial, uStep);
-    SetUserAction(uRunAction);
-}
-
-void actions::Build() const {        
-    // Step 1 Generator takes no arguments
-    generator   *uGenerator     = new generator(); 
-
-    runaction   *uRunAction     = new runaction(uMaterial, uStep);
-    eventaction *uEventAction   = new eventaction(uRunAction, uGenerator);
-    stepaction  *uStepAction    = new stepaction(uEventAction);
-    stackaction *uStackAction   = new stackaction();
-
-    SetUserAction(uGenerator); 
-    SetUserAction(uRunAction);
-    SetUserAction(uEventAction); 
-    SetUserAction(uStepAction); 
-    SetUserAction(uStackAction);
-}
-end of File: ./PGCreationStep1/sources/actions.cpp
-
-start of File: ./PGCreationStep1/sources/generator.cpp
-//===============================================================================================
-// std libraries
-//===============================================================================================
-
-//===============================================================================================
-// geant libraries
-//===============================================================================================
-
-//===============================================================================================
-// user libraries
-//===============================================================================================
-
-#include "generator.h"
-#include "G4PhysicalVolumeStore.hh"
-#include "G4VPhysicalVolume.hh"
-#include "G4SystemOfUnits.hh"
-#include "G4ParticleTable.hh"
-#include "G4GeneralParticleSource.hh"
-
-//===============================================================================================
-// de/constructor
-//===============================================================================================
-generator::generator(): 
-G4VUserPrimaryGeneratorAction() {        
-    uParticleGPS = new G4GeneralParticleSource();
-    
-    // 1. Particle Type
-    G4ParticleDefinition* particle = G4ParticleTable::GetParticleTable()->FindParticle("proton");
-    uParticleGPS->GetCurrentSource()->SetParticleDefinition(particle);
-    uParticleGPS->SetNumberOfParticles(1);
-
-    // 2. Beam Energy
-    uParticleGPS->GetCurrentSource()->GetEneDist()->SetEnergyDisType("Mono");
-    uParticleGPS->GetCurrentSource()->GetEneDist()->SetMonoEnergy(100.2098319 * MeV);
-
-    // 3. Beam Position & Spatial Distribution
-// 3. Beam Position & Spatial Distribution
-G4double fwhm = 15.9 * mm;
-G4double sigma = fwhm / 2.3548; 
-
-// Dynamically retrieve target position
-G4double targetX = 0.0;
-G4double targetY = 0.0;
-G4double targetZ = 0.0;
-G4double sourceTargetDistance = 10.0; // Distance from source to target in cm
-G4VPhysicalVolume* targetVol = G4PhysicalVolumeStore::GetInstance()->GetVolume("pOuterTarget");
-if (targetVol) {
-    targetX = targetVol->GetTranslation().x();
-    targetY = targetVol->GetTranslation().y();
-    targetZ = targetVol->GetTranslation().z();
-}
-
-G4SPSPosDistribution* posDist = uParticleGPS->GetCurrentSource()->GetPosDist();
-
-// Offset the source 10 cm upstream of the target's center along the Z-axis
-posDist->SetCentreCoords(G4ThreeVector(targetX, targetY, targetZ - sourceTargetDistance * cm));
-
-// Define the 2D distribution type
-posDist->SetPosDisType("Beam");
-posDist->SetPosDisShape("Circle"); 
-
-// --------------------------------------------------------------------------
-// Align the GPS local XY distribution plane to the global XY plane
-// --------------------------------------------------------------------------
-posDist->SetPosRot1(G4ThreeVector(1., 0., 0.)); // GPS Local X maps to Global X
-posDist->SetPosRot2(G4ThreeVector(0., 1., 0.)); // GPS Local Y maps to Global Y
-
-// Apply the symmetric 2D sigma in the new XY plane
-posDist->SetBeamSigmaInR(sigma);
-
-// 4. Momentum Direction (Propagate along Z)
-uParticleGPS->GetCurrentSource()->GetAngDist()->SetAngDistType("planar");
-uParticleGPS->GetCurrentSource()->GetAngDist()->SetParticleMomentumDirection(G4ThreeVector(0., 0., 1.));
-}
-generator::~generator() {
-    delete uParticleGPS;
-}
-
-//===============================================================================================
-// generate primaries
-//===============================================================================================
-
-void generator::GeneratePrimaries(G4Event* anEvent) {
-    uParticleGPS->GeneratePrimaryVertex(anEvent);
-    G4PrimaryVertex* vertex = anEvent->GetPrimaryVertex();
-
-    if (vertex) {
-        G4PrimaryParticle* particle = vertex->GetPrimary();
-
-        // Get the particle information.
-        if (particle) {
-            energy = particle->GetKineticEnergy();
-            position = vertex->GetPosition();
-            direction = particle->GetMomentumDirection();
-
-        // If for some reason there is no particle, set energy to -1.
-        } else { energy = -1; }
-    }
-}
-end of File: ./PGCreationStep1/sources/generator.cpp
-
-start of File: ./PGCreationStep1/sources/physics.cpp
-//===============================================================================================
-// std libraries
-//===============================================================================================
-
-//===============================================================================================
-// geant libraries
-//===============================================================================================
-
-//===============================================================================================
-// user libraries
-//===============================================================================================
-
-#include "physics.h"
-
-//===============================================================================================
-// de/constructor
-//===============================================================================================
-
-physics::physics():
-G4VModularPhysicsList(){
-    SetVerboseLevel(uVerbose);
-
-    plEM = new G4EmStandardPhysics_option4(uVerbose);
-    plEMextra = new G4EmExtraPhysics(uVerbose);
-
-    plDecay = new G4DecayPhysics(uVerbose);
-    plRadioactiveDecay = new G4RadioactiveDecayPhysics(uVerbose);
-
-    plHadronElastic = new G4HadronElasticPhysicsHP(uVerbose);
-    plHadronInelastic = new G4HadronPhysicsQGSP_BIC_HP(uVerbose);
-    // Arguments: (Name, QuasiElastic, NeutronHP, FTFP)
-    // plHadronInelastic = new G4HadronPhysicsINCLXX("hInelastic INCLXX", true, true, false);
-
-    plStoppping = new G4StoppingPhysics(uVerbose);
-
-    plIonElastic = new G4IonElasticPhysics(uVerbose);
-    plIonInelastic = new G4IonPhysics(uVerbose);
-}
-
-physics::~physics() {
-    delete plEM;
-    delete plEMextra;
-    delete plDecay;
-    delete plRadioactiveDecay;
-    delete plHadronElastic;
-    delete plHadronInelastic;
-    delete plStoppping;
-    delete plIonElastic;
-    delete plIonInelastic;
-}
-
-//===============================================================================================
-// particles constructors
-//===============================================================================================
-
-void physics::ConstructParticle(){
-    G4BosonConstructor      pcBosons;       pcBosons.ConstructParticle();
-    G4LeptonConstructor     pcLeptons;      pcLeptons.ConstructParticle();
-    G4MesonConstructor      pcMesons;       pcMesons.ConstructParticle();
-    G4BaryonConstructor     pcBaryons;      pcBaryons.ConstructParticle();
-    G4IonConstructor        pcIons;         pcIons.ConstructParticle();
-    G4ShortLivedConstructor pcShortLived;   pcShortLived.ConstructParticle();
-}
-
-//===============================================================================================
-// processes constructors
-//===============================================================================================
-
-void physics::ConstructProcess(){        
-    AddTransportation(); 
-
-    if (plEM != nullptr)               plEM->ConstructProcess();
-    if (plEMextra != nullptr)          plEMextra->ConstructProcess();
-    if (plDecay != nullptr)            plDecay->ConstructProcess();
-    if (plRadioactiveDecay != nullptr) plRadioactiveDecay->ConstructProcess();
-    if (plHadronElastic != nullptr)    plHadronElastic->ConstructProcess();
-    if (plHadronInelastic != nullptr)  plHadronInelastic->ConstructProcess();
-    if (plStoppping != nullptr)        plStoppping->ConstructProcess();
-    if (plIonElastic != nullptr)       plIonElastic->ConstructProcess();
-    if (plIonInelastic != nullptr)     plIonInelastic->ConstructProcess();
-
-    //===============================================================================
-    // Electromagnetic Processes
-    //===============================================================================
-        
-    G4EmParameters* params = G4EmParameters::Instance();    
-    params->SetFluo(true);
-    params->SetAuger(false);
-    params->SetPixe(false);
-
-    // Set Region
-    params->SetDeexActiveRegion("rtarget", true, false, false);   // <region name>, <fluo>, <auger>, <pixe>
-
-    // PIXE & Flourescence cross section (Empirical, ECPSSR_FormFactor, ECPSSR_Analytical, ECPSSR_ANSTO)
-    params->SetPIXECrossSectionModel("ECPSSR_ANSTO");
-    params->SetPIXEElectronCrossSectionModel("ECPSSR_ANSTO");
-
-    params->SetDeexcitationIgnoreCut(true);
-}
-
-/*-----------------*/
-/* simulation Cuts */
-/*-----------------*/
-
-void physics::SetCuts()
-{
-    // default cuts of 1.*mm
-    SetCutsWithDefault();
-  
-    // user cuts for world    
-    G4double ucut = 1.*mm;
-    
-    SetCutValue(ucut, "e-");
-    SetCutValue(ucut, "e+");
-    SetCutValue(ucut, "proton");
-}
-end of File: ./PGCreationStep1/sources/physics.cpp
-
-start of File: ./PGCreationStep1/sources/eventaction.cpp
-#include "eventaction.h"
-
-namespace {
-    G4Mutex threadLocker = G4MUTEX_INITIALIZER;
-}
-
-eventaction::eventaction(runaction *runaction, generator *generator):
-G4UserEventAction(), urunaction(runaction), ugenerator(generator) {
-}
-
-eventaction::~eventaction(){
-}
-
-void eventaction::BeginOfEventAction(const G4Event* uEvent){
-    eventID = uEvent->GetEventID();
-    
-    // Clear the tracking maps and force memory deallocation
-    std::unordered_map<G4int, G4int>().swap(trackToIncidentMap);
-    std::unordered_map<G4int, IncidentRecord>().swap(incidentData);
-}
-
-
-
-void eventaction::EndOfEventAction(const G4Event* uEvent) {
-    G4int evtShow = 1e7;
-    if(eventID % evtShow == 0) {
-        G4cout << "event: " << eventID << G4endl;
-    }
-
-    auto analysisManager = G4AnalysisManager::Instance();
-
-    for (const auto& pair : incidentData) {
-        const IncidentRecord& record = pair.second;
-        
-        G4double totalBGO = 0;
-        for (G4double bgoEdep : record.eDepBGO) totalBGO += bgoEdep;
-        if (record.eDepCeBr3 == 0 && totalBGO == 0) continue;
-
-        analysisManager->FillNtupleIColumn(0, 0, eventID);
-        analysisManager->FillNtupleIColumn(0, 1, record.pdg);
-        analysisManager->FillNtupleSColumn(0, 2, record.process);
-        analysisManager->FillNtupleDColumn(0, 3, record.creationEnergy);
-        analysisManager->FillNtupleDColumn(0, 4, record.globalTime);
-        analysisManager->FillNtupleDColumn(0, 5, record.eDepCeBr3);
-        
-       // Ensure 8 columns are filled for the NTuple, padding with 0 if necessary
-        for (size_t i = 0; i < 8; ++i) {
-            G4double energy = (i < record.eDepBGO.size()) ? record.eDepBGO[i] : 0.0;
-            analysisManager->FillNtupleDColumn(0, 6 + i, energy);
-        }
-
-        // Fill the new BGO time column at index 14
-        analysisManager->FillNtupleDColumn(0, 14, record.firstBGOHitTime);
-
-        analysisManager->AddNtupleRow(0);
-    }
-}
-
-void eventaction::AddIncidentParticle(G4int trackID, G4int pdg, std::string process, G4double energy, G4double time) {
-    // Traverse the ancestry tree to find the root particle
-    G4int rootID = trackID;
-    while (trackToIncidentMap.find(rootID) != trackToIncidentMap.end() && trackToIncidentMap[rootID] != rootID) {
-        rootID = trackToIncidentMap[rootID];
-    }
-
-    // Set the root map
-    trackToIncidentMap[trackID] = rootID;
-    
-    // Only create a new physical record if the root isn't already tracked
-    if (incidentData.find(rootID) == incidentData.end()) {
-        IncidentRecord record;
-        record.pdg = pdg;
-        record.process = process;
-        record.creationEnergy = energy;
-        record.globalTime = time;
-        
-        incidentData[rootID] = record;
-    }
-}
-
-void eventaction::LinkSecondary(G4int parentTrackID, G4int secondaryTrackID) {
-    // If the parent has an incident root, link the secondary to that root.
-    // Otherwise, link the secondary to the parent directly, establishing an ancestry chain.
-    if (trackToIncidentMap.find(parentTrackID) != trackToIncidentMap.end()) {
-        trackToIncidentMap[secondaryTrackID] = trackToIncidentMap[parentTrackID];
-    }
-}
-
-bool eventaction::HasIncidentMap(G4int trackID) {
-    return trackToIncidentMap.find(trackID) != trackToIncidentMap.end();
-}
-void eventaction::AddEnergy(G4int trackID, G4int copyNo, G4double edep, G4bool isPrimary, G4double hitTime) {
-    if (trackToIncidentMap.find(trackID) == trackToIncidentMap.end()) return;
-    
-    G4int incidentID = trackToIncidentMap[trackID];
-    
-    if (isPrimary) {
-        incidentData[incidentID].eDepCeBr3 += edep;
-    } else {
-        G4int bgoIndex = copyNo - 1; 
-        if (bgoIndex >= 0) {
-            // Dynamically resize vector if a new BGO copy number is found
-            if (bgoIndex >= incidentData[incidentID].eDepBGO.size()) {
-                incidentData[incidentID].eDepBGO.resize(bgoIndex + 1, 0.0);
-            }
-            incidentData[incidentID].eDepBGO[bgoIndex] += edep;
-
-            // Track the earliest hit time in the BGO
-            if (incidentData[incidentID].firstBGOHitTime < 0.0 || hitTime < incidentData[incidentID].firstBGOHitTime) {
-                incidentData[incidentID].firstBGOHitTime = hitTime;
-            }
-        }
-    }
-}
-end of File: ./PGCreationStep1/sources/eventaction.cpp
-
-start of File: ./PGCreationStep1/sources/pworld.cpp
-//===============================================================================================
-// std libraries
-//===============================================================================================
-
-//===============================================================================================
-// geant libraries
-//===============================================================================================
-
-//===============================================================================================
-// user libraries
-//===============================================================================================
-
-#include "pworld.h"
-
-//===============================================================================================
-// de/constructor
-//===============================================================================================
-
-pworld::pworld(G4String uname):
-G4VUserParallelWorld(uname) {
-}
-
-pworld::~pworld() {
-}
-
-//===============================================================================================
-// define simulation geometry
-//===============================================================================================
-
-void pworld::Construct() {
-    //-------------------------------------------------
-    // general variables
-    //-------------------------------------------------   
-
-    G4RotationMatrix *norotation = new G4RotationMatrix(0., 0., 0.);
-    G4ThreeVector atorigin = {0., 0., 0.};
-
-    //-------------------------------------------------
-    // world definition
-    //-------------------------------------------------   
-
-    G4VPhysicalVolume* gworld = GetWorld();
-    G4LogicalVolume* lworld = gworld->GetLogicalVolume();
-}
-
-//===============================================================================================
-// sensitive detectors
-//===============================================================================================
-
-void pworld::ConstructSD() {
-}
-end of File: ./PGCreationStep1/sources/pworld.cpp
-
-start of File: ./PGCreationStep1/sources/stackaction.cpp
-#include "stackaction.h"
-#include "G4Gamma.hh"
-#include "G4Neutron.hh"
-#include "G4LogicalVolumeStore.hh"
-#include "G4SystemOfUnits.hh"
-
-stackaction::stackaction() : 
-pInnerTarget(nullptr), pOuterTarget(nullptr), pointersInitialized(false) {    
-}
-
-stackaction::~stackaction(){    
-}
-
-G4ClassificationOfNewTrack stackaction::ClassifyNewTrack(const G4Track* utrack) {
-
-    return fUrgent;    
-}
-end of File: ./PGCreationStep1/sources/stackaction.cpp
-
-start of File: ./PGCreationStep1/sources/geometry.cpp
-//===============================================================================================
-// User libraries
-//===============================================================================================
-
-#include "geometry.h"
-#include "../../sharedFiles/shared_materials.h"
-#include "../../sharedFiles/shared_params.h"
-//===============================================================================================
-// De/constructor
-//===============================================================================================
-geometry::geometry(G4String targetMatName) : uTargetMatName(targetMatName) {
-    G4NistManager* nist = G4NistManager::Instance();
-    matVacuum = nist->FindOrBuildMaterial("G4_Galactic");
-    matAir    = nist->FindOrBuildMaterial("G4_AIR");
-    matAl     = nist->FindOrBuildMaterial("G4_Al");
-    matWater  = nist->FindOrBuildMaterial("G4_WATER");
-    
-    // Fetch custom materials that were built by SharedMaterials::BuildAllMaterials()
-    matTeflon      = G4Material::GetMaterial("teflon");
-    matTungsten    = G4Material::GetMaterial("tungsten");
-    matCeBr3       = G4Material::GetMaterial("CeBr3");
-    matBGO         = G4Material::GetMaterial("BGO");
-    matPolystyrene = G4Material::GetMaterial("polystyrene");
-    matCaO         = G4Material::GetMaterial("calcium_oxide");
-}
-geometry::~geometry() {    
-    if (rotDetector) {
-        delete rotDetector;
-    }
-    
-    for (auto vis : visAttributes) {
-        delete vis;
-    }
-    visAttributes.clear();
-}
-
-//===============================================================================================
-// define simulation geometry
-//===============================================================================================
-
-G4VPhysicalVolume* geometry::Construct() {
-    G4double margin = 1.5 * cm;
-    G4double worldRadius = SharedParams::targetRadius + margin;
-    G4double worldHL = SharedParams::targetHalfLength + 5.0 * cm; 
-
-    G4Tubs* sWorld = new G4Tubs("sWorld", 0, worldRadius, worldHL, 0.*deg, 360.*deg);
-    lWorld = new G4LogicalVolume(sWorld, matVacuum, "lWorld");
-    G4VPhysicalVolume* pWorld = new G4PVPlacement(nullptr, {0, 0, 0}, lWorld, "pWorld", 0, false, 0, true);
-
-    G4Material* targetMaterial = SharedMaterials::GetTargetMaterial(uTargetMatName);
-
-    G4Tubs* sTarget = new G4Tubs("sTarget", 0, SharedParams::targetRadius, SharedParams::targetHalfLength, 0.*deg, 360.*deg);
-    G4LogicalVolume* lTarget = new G4LogicalVolume(sTarget, targetMaterial, "lTarget");
-    
-    G4VisAttributes *vTarget = new G4VisAttributes(true, G4Colour(0.7, 0.7, 0.7, 1.0));
-    vTarget->SetForceSolid(true);
-    visAttributes.push_back(vTarget);
-    lTarget->SetVisAttributes(vTarget);
-
-    // Placed at origin. Beam will be offset by -5cm.
-    new G4PVPlacement(nullptr, {0., 0., 0.}, lTarget, "pOuterTarget", lWorld, false, 0, true);
-
-    return pWorld;
-}
-
-void geometry::ConstructSDandField(){
-}
-end of File: ./PGCreationStep1/sources/geometry.cpp
-
-start of File: ./PGCreationStep1/macros/vis.mac
-#verbose level
-/vis/verbose errors
-
-# use this open statment to create an OpenGl view:
-/vis/open OGL 1200x728
-
-# draw geometry
-/vis/drawVolume worlds
-
-# specify view angle (polar coords)
-/vis/viewer/set/rotationStyle freeRotation
-#/vis/viewer/set/viewpointThetaPhi 0. 0. deg
-/vis/viewer/set/viewpointThetaPhi 30. 30. deg
-
-# specify zoom value
-/vis/viewer/zoom 1.0
-
-# insert axis
-#/vis/scene/add/axes 0 0 -.25 .5 m
-#/vis/scene/add/axes 0 0 0 .05625 m
-#/vis/scene/add/axes 0 0 -.25 .25 m
-
-# viewer line width
-/vis/viewer/set/lineWidth 1
-
-# draw smooth trajectories at end of event, showing trajectory points
-# blue: positive charge
-# red: negative charge
-# green: no charge  
-# yellow: vertixes, when a line ends and another one starts
-# as markers 2 pixels wide
-# color by the charge
-
-/vis/scene/add/trajectories smooth
-# /vis/modeling/trajectories/create/drawByCharge
-# /vis/modeling/trajectories/drawByCharge-0/default/setDrawStepPts true
-# /vis/modeling/trajectories/drawByCharge-0/default/setStepPtsSize 2
-
-/vis/modeling/trajectories/create/drawByParticleID
-/vis/modeling/trajectories/drawByParticleID-0/default/setDrawStepPts true
-/vis/modeling/trajectories/drawByParticleID-0/default/setStepPtsSize 2
-
-# Assign specific colors to particle types
-/vis/modeling/trajectories/drawByParticleID-0/set gamma cyan
-/vis/modeling/trajectories/drawByParticleID-0/set neutron green
-/vis/modeling/trajectories/drawByParticleID-0/set proton blue
-/vis/modeling/trajectories/drawByParticleID-0/set e- red
-/vis/modeling/trajectories/drawByParticleID-0/set e+ magenta
-
-# update to every event
-/vis/viewer/set/autoRefresh true
-
-# to superimpose all of the events from a given run:
-/vis/scene/endOfEventAction accumulate
-end of File: ./PGCreationStep1/macros/vis.mac
-
-start of File: ./SimulationOfSetupStep2/main.cpp
-//===============================================================================================
-// Std libraries
-//===============================================================================================
-#include <iostream>
-#include <set>
-#include <chrono>
-#include <fstream>
-
-//===============================================================================================
-// Geant libraries
-//===============================================================================================
-#include "G4MTRunManager.hh"
-#include "G4RunManager.hh"
-#include "G4UIExecutive.hh"
-#include "G4UImanager.hh"
-#include "G4VisExecutive.hh"
-#include "G4VisManager.hh"
-#include "G4Threading.hh"
-#include "G4ParallelWorldPhysics.hh"
-
-//===============================================================================================
-// User libraries
-//===============================================================================================
-#include "geometry.h"
-#include "actions.h"
-#include "physics.h"
-#include "../sharedFiles/shared_materials.h"
-#include "../sharedFiles/shared_params.h"
-
-//===============================================================================================
-// Main code
-//===============================================================================================
-int main(int argc, char** argv) {
-    uint16_t sessionType = 0; uint16_t nThreads = 1; uint16_t nRuns = 0;
-    int uSeed = 0; uint64_t nHistories = 2.5e6;
-    std::string macroFile = "";
-    
-    // Default setup
-    std::string targetMaterial = "WaterCa0"; 
-    std::string stepName = "Final";
-
-    int i = 0;
-    while(++i < argc) {
-        std::string opt(argv[i]);
-        if (opt.compare("-ui") == 0) sessionType = std::stoi(argv[++i]);
-        else if (opt.compare("-n") == 0) nThreads = std::stoi(argv[++i]);
-        else if (opt.compare("-runs") == 0) nRuns = std::stoi(argv[++i]);
-        else if (opt.compare("-seed") == 0) uSeed = std::stoi(argv[++i]);        
-        else if (opt.compare("-p") == 0) nHistories = std::stoull(argv[++i]);
-        else if (opt == "-macro") macroFile = argv[++i];
-        else if (opt == "-mat") targetMaterial = argv[++i];
-    }
-
-    // Build and verify material
-    SharedMaterials::BuildAllMaterials();
-    if (!SharedMaterials::GetTargetMaterial(targetMaterial)) {
-        std::cerr << "FATAL: Material '" << targetMaterial << "' not found." << std::endl; return 1;
-    }
-
-    // Phase Space file integrity check
-    std::string psFileName = SharedParams::dataPath + "PhaseSpace_" + targetMaterial + ".root";
-    std::ifstream psFile(psFileName.c_str());
-    if (!psFile.good()) {
-        std::cerr << "FATAL: Phase space file missing for material: " << targetMaterial << "\nExpected at: " << psFileName << std::endl;
-        return 1;
-    }
-    psFile.close();
-
-    #ifdef G4MULTITHREADED
-        if (nThreads == 0) nThreads = G4Thread::hardware_concurrency();
-        G4MTRunManager *runManager = new G4MTRunManager();
-        runManager->SetNumberOfThreads(nThreads);
-    #else
-        G4RunManager *runManager = new G4RunManager();
-    #endif
-
-    G4VModularPhysicsList* physicsList = new physics;
-    physicsList->RegisterPhysics(new G4ParallelWorldPhysics("parallelWorld"));
-
-    runManager->SetUserInitialization(new geometry(targetMaterial));
-    runManager->SetUserInitialization(physicsList);
-    runManager->SetUserInitialization(new actions(targetMaterial, stepName));
-    runManager->Initialize();
-    
-    auto start = std::chrono::steady_clock::now();
-    G4VisManager *visManager = new G4VisExecutive(); visManager->Initialize();
-    G4UImanager  *uiManager  = G4UImanager::GetUIpointer();
-    G4UIExecutive *uiExecutive = 0;
-
-    if (sessionType == 1) {
-        uiExecutive = new G4UIExecutive(argc, argv, "qt");
-        if (!macroFile.empty()) uiManager->ApplyCommand("/control/execute " + macroFile);
-        uiExecutive->SessionStart();
-    } else {
-        if (sessionType == 2) {
-            uiExecutive = new G4UIExecutive(argc, argv, "tcsh");
-            if (!macroFile.empty()) uiManager->ApplyCommand("/control/execute " + macroFile);
-            uiExecutive->SessionStart();
-        }
-        const uint64_t MAX_PER_RUN = 1000000000ULL;
-        for (size_t irun = 0; irun < nRuns; ++irun) {
-            uint64_t remainingHistories = nHistories; uint64_t chunkIndex = 0;
-            while (remainingHistories > 0) {
-                uint64_t chunk = (remainingHistories > MAX_PER_RUN) ? MAX_PER_RUN : remainingHistories;
-                G4Random::setTheSeed(irun + 1 + uSeed*nRuns + chunkIndex);
-                runManager->SetRunIDCounter((irun * 10000) + chunkIndex);
-                runManager->BeamOn(chunk);
-                remainingHistories -= chunk; chunkIndex++;
-            }
-        }
-    }
-
-    auto end = std::chrono::steady_clock::now();
-    G4cout << "elapsed time: " << std::chrono::duration_cast<std::chrono::seconds>(end - start).count() << " s" << G4endl;
-
-    delete runManager; delete visManager; if (uiExecutive) delete uiExecutive;
-
-    // DYNAMIC MERGING
-    std::cout << "\nMerging chunked ROOT files in data directory..." << std::endl;
-    std::string baseName = stepName + "_" + targetMaterial;
-    std::string mergeCmd = "hadd -f " + SharedParams::dataPath + baseName + ".root " + SharedParams::dataPath + baseName + "_run*.root";
-    if (std::system(mergeCmd.c_str()) == 0) {
-        std::cout << "Merge successful. Removing temporary files..." << std::endl;
-        int rmStatus = std::system(("rm " + SharedParams::dataPath + baseName + "_run*.root").c_str());
-        (void)rmStatus; // Suppress the unused-result warning
-    } else {
-        std::cerr << "Warning: 'hadd' merge failed." << std::endl;
-    }
-    std::cout << "Press Enter to exit..." << std::endl; std::cin.get();
-}
-end of File: ./SimulationOfSetupStep2/main.cpp
+end of File: ./SimulationOfSetupStep2/headers/runaction.h
 
 start of File: ./SimulationOfSetupStep2/headers/physics.h
 #pragma once
@@ -1792,191 +2144,6 @@ class physics : public G4VModularPhysicsList {
 };
 end of File: ./SimulationOfSetupStep2/headers/physics.h
 
-start of File: ./SimulationOfSetupStep2/headers/eventaction.h
-#pragma once
-
-#include <unordered_map>
-#include <vector>
-#include <string>
-
-#include "G4RunManager.hh"
-#include "G4UserEventAction.hh"
-#include "G4Event.hh"
-#include "G4AnalysisManager.hh"
-#include "G4AutoLock.hh"
-
-#include "geometry.h"
-#include "runaction.h"
-#include "generator.h"
-
-// Structure to hold data for a single incident particle and its entire resulting shower
-struct IncidentRecord {
-    G4int pdg;
-    std::string process;
-    G4double creationEnergy;
-    G4double globalTime;
-    G4double firstBGOHitTime;
-    G4double eDepCeBr3;
-    std::vector<G4double> eDepBGO;
-    
-    IncidentRecord() : pdg(0), creationEnergy(0), globalTime(0),firstBGOHitTime(-1.0), eDepCeBr3(0) {}
-};
-
-class eventaction: public G4UserEventAction {
-    public:
-        eventaction(runaction *runaction, generator *generator);
-        virtual ~eventaction() override;
-
-        virtual void BeginOfEventAction(const G4Event* uevent) override;
-        virtual void EndOfEventAction(const G4Event* uevent) override;
-
-        // Anti-coincidence logic mapping
-        void AddIncidentParticle(G4int trackID, G4int pdg, std::string process, G4double energy, G4double time);
-        void LinkSecondary(G4int parentTrackID, G4int secondaryTrackID);
-        void AddEnergy(G4int trackID, G4int copyNo, G4double edep, G4bool isPrimary, G4double hitTime);
-        bool HasIncidentMap(G4int trackID);
-
-    private:
-        runaction *urunaction;
-        generator *ugenerator;
-        G4int eventID;
-
-        // Maps any TrackID (primary or N-th generation secondary) back to the original Incident ID
-        std::unordered_map<G4int, G4int> trackToIncidentMap;
-        // Stores the physical data for each unique Incident ID
-        std::unordered_map<G4int, IncidentRecord> incidentData;
-};
-end of File: ./SimulationOfSetupStep2/headers/eventaction.h
-
-start of File: ./SimulationOfSetupStep2/headers/pworld.h
-#pragma once
-
-//===============================================================================================
-// std libraries
-//===============================================================================================
-
-//===============================================================================================
-// geant libraries
-//===============================================================================================
-
-#include "G4VUserParallelWorld.hh"
-
-#include "G4VPhysicalVolume.hh"
-#include "G4LogicalVolume.hh"
-
-//===============================================================================================
-// user libraries
-//===============================================================================================
-
-//===============================================================================================
-// class prototype
-//===============================================================================================
-
-class pworld : public G4VUserParallelWorld
-{
-    public:
-        pworld(G4String uname);
-        virtual ~pworld() override;
-
-    public:
-        virtual void Construct() override;
-        virtual void ConstructSD() override;
-};
-end of File: ./SimulationOfSetupStep2/headers/pworld.h
-
-start of File: ./SimulationOfSetupStep2/headers/stackaction.h
-#pragma once
-
-//===============================================================================================
-// geant libraries
-//===============================================================================================
-
-#include "G4UserStackingAction.hh"
-#include "G4Track.hh"
-#include "G4LogicalVolume.hh"
-
-//===============================================================================================
-// class prototype
-//===============================================================================================
-
-class stackaction: public G4UserStackingAction
-{
-    public:
-        stackaction();
-        virtual ~stackaction() override;
-        
-        virtual G4ClassificationOfNewTrack ClassifyNewTrack(const G4Track* utrack) override;
-
-    private:
-        const G4ParticleDefinition* uparticle;
-        
-        G4LogicalVolume* pInnerTarget;
-        G4LogicalVolume* pOuterTarget;
-        bool pointersInitialized;
-};
-end of File: ./SimulationOfSetupStep2/headers/stackaction.h
-
-start of File: ./SimulationOfSetupStep2/headers/geometry.h
-#pragma once
-
-//===============================================================================================
-// std libraries
-//===============================================================================================
-#include <vector>
-
-//===============================================================================================
-// geant libraries
-//===============================================================================================
-
-#include "G4VUserDetectorConstruction.hh"
-
-#include "G4Box.hh"
-#include "G4Tubs.hh"
-
-#include "G4PVPlacement.hh"
-#include "G4VPhysicalVolume.hh"
-#include "G4LogicalVolume.hh"
-#include "G4VisAttributes.hh"
-
-#include "G4Material.hh"
-#include "G4NistManager.hh"
-#include "G4MaterialPropertiesTable.hh"
-
-#include "G4ProductionCutsTable.hh"
-#include "G4UserLimits.hh"
-#include "G4SystemOfUnits.hh"
-
-//===============================================================================================
-// class prototype
-//===============================================================================================
-
-class geometry : public G4VUserDetectorConstruction {
-    public:
-        geometry(G4String targetMatName);
-        virtual ~geometry() override;
-
-        virtual G4VPhysicalVolume* Construct() override;
-        virtual void ConstructSDandField() override;
-
-        G4LogicalVolume* getLogicalWorld() const { return lWorld; }
-        std::vector<G4LogicalVolume*> getLogicalPrimary() const { return lPrimary; }
-        std::vector<G4LogicalVolume*> getLogicalACShield() const { return lACShield; }
-        G4int getNDetectors() const { return nDetectors; }
-
-    private:
-        G4String uTargetMatName; // ADD THIS
-
-        // Material pointers
-        G4Material *matVacuum; G4Material *matAir; G4Material *matAl;
-        G4Material *matTeflon; G4Material *matTungsten; G4Material *matCeBr3;
-        G4Material *matBGO; G4Material *matPolystyrene; G4Material *matCaO; G4Material *matWater;
-        
-        G4LogicalVolume *lWorld; G4VPhysicalVolume *pWorld;
-        std::vector<G4LogicalVolume*> lPrimary; std::vector<G4LogicalVolume*> lACShield; std::vector<G4LogicalVolume*> lCollimator;
-        G4int nDetectors; G4RotationMatrix* rotDetector; std::vector<G4VisAttributes*> visAttributes;
-};
-end of File: ./SimulationOfSetupStep2/headers/geometry.h
-
 start of File: ./SimulationOfSetupStep2/headers/run.h
 #pragma once
 
@@ -2006,73 +2173,6 @@ class run : public G4Run {
     private:
 };
 end of File: ./SimulationOfSetupStep2/headers/run.h
-
-start of File: ./SimulationOfSetupStep2/headers/actions.h
-
-
-#pragma once
-#include "G4VUserActionInitialization.hh"
-#include "generator.h"
-#include "runaction.h"
-#include "eventaction.h"
-#include "stepaction.h"
-#include "stackaction.h"
-#include "G4String.hh"
-
-class actions : public G4VUserActionInitialization {
-    public:
-        actions(G4String material, G4String step);
-        virtual void Build() const override;
-        virtual void BuildForMaster() const override;
-    private:
-        G4String uMaterial;
-        G4String uStep;
-};
-end of File: ./SimulationOfSetupStep2/headers/actions.h
-
-start of File: ./SimulationOfSetupStep2/headers/generator.h
-#pragma once
-
-#include "G4VUserPrimaryGeneratorAction.hh"
-#include "G4ParticleGun.hh"
-#include "G4Event.hh"
-#include "G4SystemOfUnits.hh"
-#include "G4ThreeVector.hh"
-#include "G4AutoLock.hh"
-#include <vector>
-#include <memory>
-#include <atomic>
-
-struct PhaseSpaceParticle {
-    G4int pdg;
-    G4double energy;
-    G4ThreeVector position;
-    G4ThreeVector direction;
-    G4double time;
-};
-
-class generator : public G4VUserPrimaryGeneratorAction {    
-    public:
-        generator(G4String materialName);
-        virtual ~generator() override;
-
-        virtual void GeneratePrimaries(G4Event* anEvent) override;
-
-        G4double getIEnergy() { return energy; }
-        G4ThreeVector getIPosition() { return position; }
-        G4ThreeVector getIDirection() { return direction; }
-
-    private:
-        G4ParticleGun* uParticleGun;
-        G4double energy = -1;
-        G4ThreeVector position, direction;
-
-        // Static members shared across all threads
-        static G4Mutex mutex;
-        static std::shared_ptr<std::vector<PhaseSpaceParticle>> sharedPhaseSpaceData;
-        static std::atomic<uint64_t> globalAtomicIndex;
-};
-end of File: ./SimulationOfSetupStep2/headers/generator.h
 
 start of File: ./SimulationOfSetupStep2/headers/stepaction.h
 #pragma once
@@ -2117,353 +2217,62 @@ class stepaction: public G4UserSteppingAction
 };
 end of File: ./SimulationOfSetupStep2/headers/stepaction.h
 
-start of File: ./SimulationOfSetupStep2/headers/runaction.h
-#pragma once
-#include "G4RunManager.hh"
-#include "G4UserRunAction.hh"
-#include "G4Run.hh"
-#include "G4AnalysisManager.hh"
-#include "G4String.hh"
-#include "run.h"
-#include "geometry.h"
+start of File: ./SimulationOfSetupStep2/macros/vis.mac
+#verbose level
+/vis/verbose errors
 
-class G4Run;
+# use this open statment to create an OpenGl view:
+/vis/open OGL 1200x728
 
-class runaction: public G4UserRunAction {
-    public:
-        runaction(G4String material, G4String step);
-        virtual ~runaction() override;
-        
-        virtual G4Run* GenerateRun() override;
-        virtual void BeginOfRunAction(const G4Run* urun) override;
-        virtual void EndOfRunAction(const G4Run* urun) override;
-    private:
-        G4String uMaterial;
-        G4String uStep;
-};
-end of File: ./SimulationOfSetupStep2/headers/runaction.h
+# draw geometry
+/vis/drawVolume worlds
 
-start of File: ./SimulationOfSetupStep2/sources/stepaction.cpp
-#include "stepaction.h"
-#include "G4SystemOfUnits.hh"
-#include "G4LogicalVolumeStore.hh"
+# specify view angle (polar coords)
+/vis/viewer/set/rotationStyle freeRotation
+#/vis/viewer/set/viewpointThetaPhi 0. 0. deg
+/vis/viewer/set/viewpointThetaPhi 30. 30. deg
 
-stepaction::stepaction(eventaction *eventaction): 
-G4UserSteppingAction(), ueventaction(eventaction), pDetectorAssembly(nullptr),pOuterTarget(nullptr), pWorld(nullptr), pointersInitialized(false){
-}
+# specify zoom value
+/vis/viewer/zoom 1.0
 
-stepaction::~stepaction(){    
-}
+# insert axis
+#/vis/scene/add/axes 0 0 -.25 .5 m
+#/vis/scene/add/axes 0 0 0 .05625 m
+#/vis/scene/add/axes 0 0 -.25 .25 m
 
-void stepaction::UserSteppingAction(const G4Step *uStep){
-    G4Track* track = uStep->GetTrack();
+# viewer line width
+/vis/viewer/set/lineWidth 1
 
-    // ----------------------------------------------------------------
-    // 1. Hardware Cutoff
-    // ----------------------------------------------------------------
-    if (track->GetGlobalTime() > 900.0 * s) {
-        track->SetTrackStatus(fStopAndKill);
-        return;
-    }
+# draw smooth trajectories at end of event, showing trajectory points
+# blue: positive charge
+# red: negative charge
+# green: no charge  
+# yellow: vertixes, when a line ends and another one starts
+# as markers 2 pixels wide
+# color by the charge
 
-    if (!pointersInitialized) {
-        pDetectorAssembly = G4LogicalVolumeStore::GetInstance()->GetVolume("lDetectorAssembly", false);
-        pOuterTarget = G4LogicalVolumeStore::GetInstance()->GetVolume("lOuterTarget", false);
-        pWorld = G4LogicalVolumeStore::GetInstance()->GetVolume("lWorld", false);
-        pointersInitialized = true;
-    }
+/vis/scene/add/trajectories smooth
+# /vis/modeling/trajectories/create/drawByCharge
+# /vis/modeling/trajectories/drawByCharge-0/default/setDrawStepPts true
+# /vis/modeling/trajectories/drawByCharge-0/default/setStepPtsSize 2
 
-    G4StepPoint* preStepPoint  = uStep->GetPreStepPoint();
-    G4StepPoint* postStepPoint = uStep->GetPostStepPoint();
+/vis/modeling/trajectories/create/drawByParticleID
+/vis/modeling/trajectories/drawByParticleID-0/default/setDrawStepPts true
+/vis/modeling/trajectories/drawByParticleID-0/default/setStepPtsSize 2
 
-    G4VPhysicalVolume* prePhys = preStepPoint->GetPhysicalVolume();
-    G4VPhysicalVolume* postPhys = postStepPoint->GetPhysicalVolume();
-    
-    if (!prePhys || !postPhys) return;
+# Assign specific colors to particle types
+/vis/modeling/trajectories/drawByParticleID-0/set gamma cyan
+/vis/modeling/trajectories/drawByParticleID-0/set neutron green
+/vis/modeling/trajectories/drawByParticleID-0/set proton blue
+/vis/modeling/trajectories/drawByParticleID-0/set e- red
+/vis/modeling/trajectories/drawByParticleID-0/set e+ magenta
 
-    G4LogicalVolume *preVolume = prePhys->GetLogicalVolume();
-    G4LogicalVolume *postVolume = postPhys->GetLogicalVolume();
-    G4int trackID = track->GetTrackID();
+# update to every event
+/vis/viewer/set/autoRefresh true
 
-    // ----------------------------------------------------------------
-    // Target Exit Directional Culling (Universal)
-    // ----------------------------------------------------------------
-    if (preVolume == pOuterTarget && postVolume == pWorld) {
-        G4ThreeVector momentumDir = track->GetMomentumDirection();
-        G4ThreeVector detAxis(1.0, 0.0, 0.0);
-        
-        if (momentumDir.angle(detAxis) > 45.0 * deg) {
-            track->SetTrackStatus(fStopAndKill);
-            return;
-        }
-    }
-
-    // ----------------------------------------------------------------
-    // 2. Incident Particle Boundary Detection
-    // ----------------------------------------------------------------
-    G4bool preInDetector = false;
-    G4bool postInDetector = false;
-
-    auto preTouchable = preStepPoint->GetTouchable();
-    for (G4int i = 0; i <= preTouchable->GetHistoryDepth(); ++i) {
-        if (preTouchable->GetVolume(i)->GetLogicalVolume() == pDetectorAssembly) {
-            preInDetector = true; break;
-        }
-    }
-
-    auto postTouchable = postStepPoint->GetTouchable();
-    for (G4int i = 0; i <= postTouchable->GetHistoryDepth(); ++i) {
-        if (postTouchable->GetVolume(i)->GetLogicalVolume() == pDetectorAssembly) {
-            postInDetector = true; break;
-        }
-    }
-
-    if (postInDetector && !preInDetector) {
-        if (!ueventaction->HasIncidentMap(trackID)) {
-            G4String procName = track->GetCreatorProcess() ? track->GetCreatorProcess()->GetProcessName() : "Primary";
-            ueventaction->AddIncidentParticle(
-                trackID, track->GetDefinition()->GetPDGEncoding(), procName, 
-                track->GetKineticEnergy() / MeV, track->GetGlobalTime() / ns
-            );
-        }
-    }
-
-    // ----------------------------------------------------------------
-    // 3. Secondary Inheritance Mapping (At Birth)
-    // ----------------------------------------------------------------
-    if (ueventaction->HasIncidentMap(trackID)) {
-        const std::vector<const G4Track*>* secondaries = uStep->GetSecondaryInCurrentStep();
-        if (secondaries) {
-            for (auto sec : *secondaries) {
-                ueventaction->LinkSecondary(trackID, sec->GetTrackID());
-            }
-        }
-    }
-
-    // ----------------------------------------------------------------
-    // 4. Energy Scoring
-    // ----------------------------------------------------------------
-    G4double edep = uStep->GetTotalEnergyDeposit() / MeV;
-    if (edep > 0) {
-        static const G4LogicalVolume* lCeBr3_ptr = G4LogicalVolumeStore::GetInstance()->GetVolume("lCeBr3", false);
-        static const G4LogicalVolume* lBGO_ptr = G4LogicalVolumeStore::GetInstance()->GetVolume("lBGO", false);
-
-        G4double hitTime = track->GetGlobalTime() / ns; // Get the time of the hit
-
-        if (preVolume == lCeBr3_ptr) {
-            ueventaction->AddEnergy(trackID, preStepPoint->GetTouchable()->GetCopyNumber(), edep, true, hitTime);
-        } 
-        else if (preVolume == lBGO_ptr) {
-            ueventaction->AddEnergy(trackID, preStepPoint->GetTouchable()->GetCopyNumber(), edep, false, hitTime);
-        }
-    }
-}
-end of File: ./SimulationOfSetupStep2/sources/stepaction.cpp
-
-start of File: ./SimulationOfSetupStep2/sources/run.cpp
-//===============================================================================================
-// std libraries
-//===============================================================================================
-
-//===============================================================================================
-// geant libraries
-//===============================================================================================
-
-//===============================================================================================
-// user libraries
-//===============================================================================================
-
-#include "run.h"
-
-//===============================================================================================
-// de/constructor
-//===============================================================================================
-
-
-run::run():
-G4Run(){  
-}
-
-run::~run(){  
-}
-
-end of File: ./SimulationOfSetupStep2/sources/run.cpp
-
-start of File: ./SimulationOfSetupStep2/sources/runaction.cpp
-#include "runaction.h"
-#include "../../sharedFiles/shared_params.h"
-runaction::runaction(G4String material, G4String step) : G4UserRunAction(), uMaterial(material), uStep(step) {
-    auto analysisManager = G4AnalysisManager::Instance();
-    #ifdef G4MULTITHREADED
-        analysisManager->SetNtupleMerging(false);
-    #endif
-    analysisManager->SetDefaultFileType("root");
-    analysisManager->SetVerboseLevel(1);
-    
-    // Define the NTuple structure once at initialization
-    analysisManager->CreateNtuple("incident_analysis", "Scored Particles and AC logic");
-    analysisManager->CreateNtupleIColumn("eventid");
-    analysisManager->CreateNtupleIColumn("pdg");
-    analysisManager->CreateNtupleSColumn("process");
-    analysisManager->CreateNtupleDColumn("creation_energy");
-    analysisManager->CreateNtupleDColumn("global_time");
-    analysisManager->CreateNtupleDColumn("edep_cebr3");
-    analysisManager->CreateNtupleDColumn("edep_bgo1");
-    analysisManager->CreateNtupleDColumn("edep_bgo2");
-    analysisManager->CreateNtupleDColumn("edep_bgo3");
-    analysisManager->CreateNtupleDColumn("edep_bgo4");
-    analysisManager->CreateNtupleDColumn("edep_bgo5");
-    analysisManager->CreateNtupleDColumn("edep_bgo6");
-    analysisManager->CreateNtupleDColumn("edep_bgo7");
-    analysisManager->CreateNtupleDColumn("edep_bgo8");
-    analysisManager->CreateNtupleDColumn("first_bgo_time");
-    analysisManager->FinishNtuple(0);
-}
-
-runaction::~runaction(){
-}
-
-G4Run* runaction::GenerateRun() {
-    return new run;
-}
-void runaction::BeginOfRunAction(const G4Run* urun){   
-    auto analysisManager = G4AnalysisManager::Instance();
-    G4String fileName = SharedParams::dataPath + uStep + "_" + uMaterial + "_run" + std::to_string(urun->GetRunID()) + ".root";
-    analysisManager->OpenFile(fileName);
-}
-void runaction::EndOfRunAction(const G4Run* urun){
-    auto analysisManager = G4AnalysisManager::Instance();
-    analysisManager->Write();
-    analysisManager->CloseFile();
-}
-end of File: ./SimulationOfSetupStep2/sources/runaction.cpp
-
-start of File: ./SimulationOfSetupStep2/sources/actions.cpp
-#include "actions.h"
-
-actions::actions(G4String material, G4String step) : uMaterial(material), uStep(step) {}
-
-void actions::BuildForMaster() const {
-    // This forces the Master Thread to read the merged file (without appending _t0)
-    // and loads it into your static sharedPhaseSpaceData vector.
-    generator tempGen(uMaterial);
-
-    runaction *uRunAction = new runaction(uMaterial, uStep);
-    SetUserAction(uRunAction);
-}
-
-void actions::Build() const {        
-    // In Step 1, generator takes no string, in Step 2 it takes uMaterial. 
-    // If your Step 1 generator doesn't take an argument, it's safe to just use 'new generator()' here for Step 1 
-    // and 'new generator(uMaterial)' for Step 2. Assuming you update Step 2 generator per the instructions below:
-
-    generator   *uGenerator     = new generator(uMaterial);
-
-
-    runaction   *uRunAction     = new runaction(uMaterial, uStep);
-    eventaction *uEventAction   = new eventaction(uRunAction, uGenerator);
-    stepaction  *uStepAction    = new stepaction(uEventAction);
-    stackaction *uStackAction   = new stackaction();
-
-    SetUserAction(uGenerator); SetUserAction(uRunAction);
-    SetUserAction(uEventAction); SetUserAction(uStepAction); SetUserAction(uStackAction);
-}
-end of File: ./SimulationOfSetupStep2/sources/actions.cpp
-
-start of File: ./SimulationOfSetupStep2/sources/generator.cpp
-#include "generator.h"
-#include "../../sharedFiles/shared_params.h"
-#include "G4ParticleTable.hh"
-#include "G4ParticleDefinition.hh"
-#include "G4RootAnalysisReader.hh"
-#include "G4RunManager.hh" // ADD THIS LINE
-
-// Initialize static members
-std::shared_ptr<std::vector<PhaseSpaceParticle>> generator::sharedPhaseSpaceData = nullptr;
-std::atomic<uint64_t> generator::globalAtomicIndex{0};
-G4Mutex generator::mutex = G4MUTEX_INITIALIZER;
-
-generator::generator(G4String materialName): G4VUserPrimaryGeneratorAction() {        
-    uParticleGun = new G4ParticleGun(1);
-    
-    G4AutoLock lock(&mutex);
-    
-    if (sharedPhaseSpaceData == nullptr) {
-        sharedPhaseSpaceData = std::make_shared<std::vector<PhaseSpaceParticle>>();
-        
-        auto analysisReader = G4RootAnalysisReader::Instance();
-        G4String psFilePath = SharedParams::dataPath + "PhaseSpace_" + materialName + ".root";
-        analysisReader->SetFileName(psFilePath);
-        
-        G4int ntupleId = analysisReader->GetNtuple("PhaseSpace");
-        // ... (Keep the rest of your Tree-reading logic exactly as it is) ...
-        
-        if (ntupleId >= 0) {
-            G4int eventid, pdg;
-            G4double energy_MeV, pos_x_cm, pos_y_cm, pos_z_cm, mom_dir_x, mom_dir_y, mom_dir_z, time_ns;
-            
-            analysisReader->SetNtupleIColumn("eventid", eventid);
-            analysisReader->SetNtupleIColumn("pdg", pdg);
-            analysisReader->SetNtupleDColumn("energy_MeV", energy_MeV);
-            analysisReader->SetNtupleDColumn("pos_x_cm", pos_x_cm);
-            analysisReader->SetNtupleDColumn("pos_y_cm", pos_y_cm);
-            analysisReader->SetNtupleDColumn("pos_z_cm", pos_z_cm);
-            analysisReader->SetNtupleDColumn("mom_dir_x", mom_dir_x);
-            analysisReader->SetNtupleDColumn("mom_dir_y", mom_dir_y);
-            analysisReader->SetNtupleDColumn("mom_dir_z", mom_dir_z);
-            analysisReader->SetNtupleDColumn("time_ns", time_ns);
-            
-            while (analysisReader->GetNtupleRow(ntupleId)) {
-                PhaseSpaceParticle p;
-                p.pdg = pdg;
-                p.energy = energy_MeV;
-                p.position = G4ThreeVector(pos_x_cm * cm, pos_y_cm * cm, pos_z_cm * cm);
-                p.direction = G4ThreeVector(mom_dir_x, mom_dir_y, mom_dir_z);
-                p.time = time_ns;
-                sharedPhaseSpaceData->push_back(p);
-            }
-        } else {
-            G4Exception("generator::generator()", "TreeError", FatalException, "PhaseSpace tree not found.");
-        }
-    }
-    lock.unlock();
-}
-
-generator::~generator() {
-    delete uParticleGun;
-    // sharedPhaseSpaceData automatically cleans up when the last thread instance is destroyed.
-}
-
-void generator::GeneratePrimaries(G4Event* anEvent) {
-    if (!sharedPhaseSpaceData || sharedPhaseSpaceData->empty()) return;
-
-    // Fetch next index atomically and increment
-    uint64_t myIndex = globalAtomicIndex.fetch_add(1, std::memory_order_relaxed);
-
-    if (myIndex >= sharedPhaseSpaceData->size()) {
-        G4RunManager::GetRunManager()->AbortRun();
-        return;
-    }
-
-    const PhaseSpaceParticle& p = (*sharedPhaseSpaceData)[myIndex];
-
-    G4ParticleDefinition* particle = G4ParticleTable::GetParticleTable()->FindParticle(p.pdg);
-    if (!particle) particle = G4ParticleTable::GetParticleTable()->FindParticle("gamma");
-
-    uParticleGun->SetParticleDefinition(particle);
-    uParticleGun->SetParticleEnergy(p.energy * MeV);
-    
-    position = p.position;
-    uParticleGun->SetParticlePosition(position);
-
-    direction = p.direction;
-    uParticleGun->SetParticleMomentumDirection(direction);
-    uParticleGun->SetParticleTime(p.time * ns);
-
-    uParticleGun->GeneratePrimaryVertex(anEvent);
-    energy = p.energy * MeV;
-}
-end of File: ./SimulationOfSetupStep2/sources/generator.cpp
+# to superimpose all of the events from a given run:
+/vis/scene/endOfEventAction accumulate
+end of File: ./SimulationOfSetupStep2/macros/vis.mac
 
 start of File: ./SimulationOfSetupStep2/sources/physics.cpp
 //===============================================================================================
@@ -2584,6 +2393,110 @@ void physics::SetCuts()
 }
 end of File: ./SimulationOfSetupStep2/sources/physics.cpp
 
+start of File: ./SimulationOfSetupStep2/sources/runaction.cpp
+#include "runaction.h"
+#include "../../sharedFiles/shared_params.h"
+runaction::runaction(G4String material, G4String step) : G4UserRunAction(), uMaterial(material), uStep(step) {
+    auto analysisManager = G4AnalysisManager::Instance();
+    #ifdef G4MULTITHREADED
+        analysisManager->SetNtupleMerging(true);
+    #endif
+    analysisManager->SetDefaultFileType("root");
+    analysisManager->SetVerboseLevel(1);
+    
+    // Define the NTuple structure once at initialization
+    analysisManager->CreateNtuple("incident_analysis", "Scored Particles and AC logic");
+    analysisManager->CreateNtupleIColumn("eventid");
+    analysisManager->CreateNtupleIColumn("pdg");
+    analysisManager->CreateNtupleSColumn("process");
+    analysisManager->CreateNtupleDColumn("creation_energy");
+    analysisManager->CreateNtupleDColumn("global_time");
+    analysisManager->CreateNtupleDColumn("edep_cebr3");
+    analysisManager->CreateNtupleDColumn("edep_bgo1");
+    analysisManager->CreateNtupleDColumn("edep_bgo2");
+    analysisManager->CreateNtupleDColumn("edep_bgo3");
+    analysisManager->CreateNtupleDColumn("edep_bgo4");
+    analysisManager->CreateNtupleDColumn("edep_bgo5");
+    analysisManager->CreateNtupleDColumn("edep_bgo6");
+    analysisManager->CreateNtupleDColumn("edep_bgo7");
+    analysisManager->CreateNtupleDColumn("edep_bgo8");
+    analysisManager->CreateNtupleDColumn("first_bgo_time");
+    analysisManager->FinishNtuple(0);
+}
+
+runaction::~runaction(){
+}
+
+G4Run* runaction::GenerateRun() {
+    return new run;
+}
+void runaction::BeginOfRunAction(const G4Run* urun){   
+    auto analysisManager = G4AnalysisManager::Instance();
+    // Updated path and filename for Step 2
+    G4String fileName = SharedParams::dataPath + "detectorSimulationOutput/" + uMaterial + "/DetectorOutput_" + uMaterial + "_run" + std::to_string(urun->GetRunID()) + ".root";
+    analysisManager->OpenFile(fileName);
+}
+void runaction::EndOfRunAction(const G4Run* urun){
+    auto analysisManager = G4AnalysisManager::Instance();
+    analysisManager->Write();
+    analysisManager->CloseFile();
+}
+end of File: ./SimulationOfSetupStep2/sources/runaction.cpp
+
+start of File: ./SimulationOfSetupStep2/sources/pworld.cpp
+//===============================================================================================
+// std libraries
+//===============================================================================================
+
+//===============================================================================================
+// geant libraries
+//===============================================================================================
+
+//===============================================================================================
+// user libraries
+//===============================================================================================
+
+#include "pworld.h"
+
+//===============================================================================================
+// de/constructor
+//===============================================================================================
+
+pworld::pworld(G4String uname):
+G4VUserParallelWorld(uname) {
+}
+
+pworld::~pworld() {
+}
+
+//===============================================================================================
+// define simulation geometry
+//===============================================================================================
+
+void pworld::Construct() {
+    //-------------------------------------------------
+    // general variables
+    //-------------------------------------------------   
+
+    G4RotationMatrix *norotation = new G4RotationMatrix(0., 0., 0.);
+    G4ThreeVector atorigin = {0., 0., 0.};
+
+    //-------------------------------------------------
+    // world definition
+    //-------------------------------------------------   
+
+    G4VPhysicalVolume* gworld = GetWorld();
+    G4LogicalVolume* lworld = gworld->GetLogicalVolume();
+}
+
+//===============================================================================================
+// sensitive detectors
+//===============================================================================================
+
+void pworld::ConstructSD() {
+}
+end of File: ./SimulationOfSetupStep2/sources/pworld.cpp
+
 start of File: ./SimulationOfSetupStep2/sources/eventaction.cpp
 #include "eventaction.h"
 
@@ -2701,7 +2614,7 @@ void eventaction::AddEnergy(G4int trackID, G4int copyNo, G4double edep, G4bool i
 }
 end of File: ./SimulationOfSetupStep2/sources/eventaction.cpp
 
-start of File: ./SimulationOfSetupStep2/sources/pworld.cpp
+start of File: ./SimulationOfSetupStep2/sources/run.cpp
 //===============================================================================================
 // std libraries
 //===============================================================================================
@@ -2714,66 +2627,53 @@ start of File: ./SimulationOfSetupStep2/sources/pworld.cpp
 // user libraries
 //===============================================================================================
 
-#include "pworld.h"
+#include "run.h"
 
 //===============================================================================================
 // de/constructor
 //===============================================================================================
 
-pworld::pworld(G4String uname):
-G4VUserParallelWorld(uname) {
+
+run::run():
+G4Run(){  
 }
 
-pworld::~pworld() {
+run::~run(){  
 }
 
-//===============================================================================================
-// define simulation geometry
-//===============================================================================================
+end of File: ./SimulationOfSetupStep2/sources/run.cpp
 
-void pworld::Construct() {
-    //-------------------------------------------------
-    // general variables
-    //-------------------------------------------------   
+start of File: ./SimulationOfSetupStep2/sources/actions.cpp
+#include "actions.h"
 
-    G4RotationMatrix *norotation = new G4RotationMatrix(0., 0., 0.);
-    G4ThreeVector atorigin = {0., 0., 0.};
+actions::actions(G4String material, G4String step) : uMaterial(material), uStep(step) {}
 
-    //-------------------------------------------------
-    // world definition
-    //-------------------------------------------------   
+void actions::BuildForMaster() const {
+    // This forces the Master Thread to read the merged file (without appending _t0)
+    // and loads it into your static sharedPhaseSpaceData vector.
+    generator tempGen(uMaterial);
 
-    G4VPhysicalVolume* gworld = GetWorld();
-    G4LogicalVolume* lworld = gworld->GetLogicalVolume();
+    runaction *uRunAction = new runaction(uMaterial, uStep);
+    SetUserAction(uRunAction);
 }
 
-//===============================================================================================
-// sensitive detectors
-//===============================================================================================
+void actions::Build() const {        
+    // In Step 1, generator takes no string, in Step 2 it takes uMaterial. 
+    // If your Step 1 generator doesn't take an argument, it's safe to just use 'new generator()' here for Step 1 
+    // and 'new generator(uMaterial)' for Step 2. Assuming you update Step 2 generator per the instructions below:
 
-void pworld::ConstructSD() {
+    generator   *uGenerator     = new generator(uMaterial);
+
+
+    runaction   *uRunAction     = new runaction(uMaterial, uStep);
+    eventaction *uEventAction   = new eventaction(uRunAction, uGenerator);
+    stepaction  *uStepAction    = new stepaction(uEventAction);
+    stackaction *uStackAction   = new stackaction();
+
+    SetUserAction(uGenerator); SetUserAction(uRunAction);
+    SetUserAction(uEventAction); SetUserAction(uStepAction); SetUserAction(uStackAction);
 }
-end of File: ./SimulationOfSetupStep2/sources/pworld.cpp
-
-start of File: ./SimulationOfSetupStep2/sources/stackaction.cpp
-#include "stackaction.h"
-#include "G4Gamma.hh"
-#include "G4Neutron.hh"
-#include "G4LogicalVolumeStore.hh"
-#include "G4SystemOfUnits.hh"
-
-stackaction::stackaction() : 
-pInnerTarget(nullptr), pOuterTarget(nullptr), pointersInitialized(false) {    
-}
-
-stackaction::~stackaction(){    
-}
-
-G4ClassificationOfNewTrack stackaction::ClassifyNewTrack(const G4Track* utrack) {
-
-    return fUrgent;    
-}
-end of File: ./SimulationOfSetupStep2/sources/stackaction.cpp
+end of File: ./SimulationOfSetupStep2/sources/actions.cpp
 
 start of File: ./SimulationOfSetupStep2/sources/geometry.cpp
 #include "geometry.h"
@@ -3052,60 +2952,235 @@ void geometry::ConstructSDandField(){
 }
 end of File: ./SimulationOfSetupStep2/sources/geometry.cpp
 
-start of File: ./SimulationOfSetupStep2/macros/vis.mac
-#verbose level
-/vis/verbose errors
+start of File: ./SimulationOfSetupStep2/sources/generator.cpp
+#include "generator.h"
+#include "../../sharedFiles/shared_params.h"
+#include "G4ParticleTable.hh"
+#include "G4ParticleDefinition.hh"
+#include "G4RootAnalysisReader.hh"
+#include "G4RunManager.hh" // ADD THIS LINE
 
-# use this open statment to create an OpenGl view:
-/vis/open OGL 1200x728
+// Initialize static members
+std::shared_ptr<std::vector<PhaseSpaceParticle>> generator::sharedPhaseSpaceData = nullptr;
+std::atomic<uint64_t> generator::globalAtomicIndex{0};
+G4Mutex generator::mutex = G4MUTEX_INITIALIZER;
 
-# draw geometry
-/vis/drawVolume worlds
+generator::generator(G4String materialName): G4VUserPrimaryGeneratorAction() {        
+    uParticleGun = new G4ParticleGun(1);
+    
+    G4AutoLock lock(&mutex);
+    
+    if (sharedPhaseSpaceData == nullptr) {
+        sharedPhaseSpaceData = std::make_shared<std::vector<PhaseSpaceParticle>>();
+        
+        auto analysisReader = G4RootAnalysisReader::Instance();
+        G4String psFilePath = SharedParams::dataPath + "materialPhaseSpaces/" + materialName + "/PhaseSpace_" + materialName + ".root";
+        analysisReader->SetFileName(psFilePath);
+        
+        G4int ntupleId = analysisReader->GetNtuple("PhaseSpace");
+        // ... (Keep the rest of your Tree-reading logic exactly as it is) ...
+        
+        if (ntupleId >= 0) {
+            G4int eventid, pdg;
+            G4double energy_MeV, pos_x_cm, pos_y_cm, pos_z_cm, mom_dir_x, mom_dir_y, mom_dir_z, time_ns;
+            
+            analysisReader->SetNtupleIColumn("eventid", eventid);
+            analysisReader->SetNtupleIColumn("pdg", pdg);
+            analysisReader->SetNtupleDColumn("energy_MeV", energy_MeV);
+            analysisReader->SetNtupleDColumn("pos_x_cm", pos_x_cm);
+            analysisReader->SetNtupleDColumn("pos_y_cm", pos_y_cm);
+            analysisReader->SetNtupleDColumn("pos_z_cm", pos_z_cm);
+            analysisReader->SetNtupleDColumn("mom_dir_x", mom_dir_x);
+            analysisReader->SetNtupleDColumn("mom_dir_y", mom_dir_y);
+            analysisReader->SetNtupleDColumn("mom_dir_z", mom_dir_z);
+            analysisReader->SetNtupleDColumn("time_ns", time_ns);
+            
+            while (analysisReader->GetNtupleRow(ntupleId)) {
+                PhaseSpaceParticle p;
+                p.pdg = pdg;
+                p.energy = energy_MeV;
+                p.position = G4ThreeVector(pos_x_cm * cm, pos_y_cm * cm, pos_z_cm * cm);
+                p.direction = G4ThreeVector(mom_dir_x, mom_dir_y, mom_dir_z);
+                p.time = time_ns;
+                sharedPhaseSpaceData->push_back(p);
+            }
+        } else {
+            G4Exception("generator::generator()", "TreeError", FatalException, "PhaseSpace tree not found.");
+        }
+    }
+    lock.unlock();
+}
 
-# specify view angle (polar coords)
-/vis/viewer/set/rotationStyle freeRotation
-#/vis/viewer/set/viewpointThetaPhi 0. 0. deg
-/vis/viewer/set/viewpointThetaPhi 30. 30. deg
+generator::~generator() {
+    delete uParticleGun;
+    // sharedPhaseSpaceData automatically cleans up when the last thread instance is destroyed.
+}
 
-# specify zoom value
-/vis/viewer/zoom 1.0
+void generator::GeneratePrimaries(G4Event* anEvent) {
+    if (!sharedPhaseSpaceData || sharedPhaseSpaceData->empty()) return;
 
-# insert axis
-#/vis/scene/add/axes 0 0 -.25 .5 m
-#/vis/scene/add/axes 0 0 0 .05625 m
-#/vis/scene/add/axes 0 0 -.25 .25 m
+    // Fetch next index atomically and increment
+    uint64_t myIndex = globalAtomicIndex.fetch_add(1, std::memory_order_relaxed);
 
-# viewer line width
-/vis/viewer/set/lineWidth 1
+    if (myIndex >= sharedPhaseSpaceData->size()) {
+        G4RunManager::GetRunManager()->AbortRun();
+        return;
+    }
 
-# draw smooth trajectories at end of event, showing trajectory points
-# blue: positive charge
-# red: negative charge
-# green: no charge  
-# yellow: vertixes, when a line ends and another one starts
-# as markers 2 pixels wide
-# color by the charge
+    const PhaseSpaceParticle& p = (*sharedPhaseSpaceData)[myIndex];
 
-/vis/scene/add/trajectories smooth
-# /vis/modeling/trajectories/create/drawByCharge
-# /vis/modeling/trajectories/drawByCharge-0/default/setDrawStepPts true
-# /vis/modeling/trajectories/drawByCharge-0/default/setStepPtsSize 2
+    G4ParticleDefinition* particle = G4ParticleTable::GetParticleTable()->FindParticle(p.pdg);
+    if (!particle) particle = G4ParticleTable::GetParticleTable()->FindParticle("gamma");
 
-/vis/modeling/trajectories/create/drawByParticleID
-/vis/modeling/trajectories/drawByParticleID-0/default/setDrawStepPts true
-/vis/modeling/trajectories/drawByParticleID-0/default/setStepPtsSize 2
+    uParticleGun->SetParticleDefinition(particle);
+    uParticleGun->SetParticleEnergy(p.energy * MeV);
+    
+    position = p.position;
+    uParticleGun->SetParticlePosition(position);
 
-# Assign specific colors to particle types
-/vis/modeling/trajectories/drawByParticleID-0/set gamma cyan
-/vis/modeling/trajectories/drawByParticleID-0/set neutron green
-/vis/modeling/trajectories/drawByParticleID-0/set proton blue
-/vis/modeling/trajectories/drawByParticleID-0/set e- red
-/vis/modeling/trajectories/drawByParticleID-0/set e+ magenta
+    direction = p.direction;
+    uParticleGun->SetParticleMomentumDirection(direction);
+    uParticleGun->SetParticleTime(p.time * ns);
 
-# update to every event
-/vis/viewer/set/autoRefresh true
+    uParticleGun->GeneratePrimaryVertex(anEvent);
+    energy = p.energy * MeV;
+}
+end of File: ./SimulationOfSetupStep2/sources/generator.cpp
 
-# to superimpose all of the events from a given run:
-/vis/scene/endOfEventAction accumulate
-end of File: ./SimulationOfSetupStep2/macros/vis.mac
+start of File: ./SimulationOfSetupStep2/sources/stackaction.cpp
+#include "stackaction.h"
+#include "G4Gamma.hh"
+#include "G4Neutron.hh"
+#include "G4LogicalVolumeStore.hh"
+#include "G4SystemOfUnits.hh"
+
+stackaction::stackaction() : 
+pInnerTarget(nullptr), pOuterTarget(nullptr), pointersInitialized(false) {    
+}
+
+stackaction::~stackaction(){    
+}
+
+G4ClassificationOfNewTrack stackaction::ClassifyNewTrack(const G4Track* utrack) {
+
+    return fUrgent;    
+}
+end of File: ./SimulationOfSetupStep2/sources/stackaction.cpp
+
+start of File: ./SimulationOfSetupStep2/sources/stepaction.cpp
+#include "stepaction.h"
+#include "G4SystemOfUnits.hh"
+#include "G4LogicalVolumeStore.hh"
+
+stepaction::stepaction(eventaction *eventaction): 
+G4UserSteppingAction(), ueventaction(eventaction), pDetectorAssembly(nullptr),pOuterTarget(nullptr), pWorld(nullptr), pointersInitialized(false){
+}
+
+stepaction::~stepaction(){    
+}
+
+void stepaction::UserSteppingAction(const G4Step *uStep){
+    G4Track* track = uStep->GetTrack();
+
+    // ----------------------------------------------------------------
+    // 1. Hardware Cutoff
+    // ----------------------------------------------------------------
+    if (track->GetGlobalTime() > 900.0 * s) {
+        track->SetTrackStatus(fStopAndKill);
+        return;
+    }
+
+    if (!pointersInitialized) {
+        pDetectorAssembly = G4LogicalVolumeStore::GetInstance()->GetVolume("lDetectorAssembly", false);
+        pOuterTarget = G4LogicalVolumeStore::GetInstance()->GetVolume("lOuterTarget", false);
+        pWorld = G4LogicalVolumeStore::GetInstance()->GetVolume("lWorld", false);
+        pointersInitialized = true;
+    }
+
+    G4StepPoint* preStepPoint  = uStep->GetPreStepPoint();
+    G4StepPoint* postStepPoint = uStep->GetPostStepPoint();
+
+    G4VPhysicalVolume* prePhys = preStepPoint->GetPhysicalVolume();
+    G4VPhysicalVolume* postPhys = postStepPoint->GetPhysicalVolume();
+    
+    if (!prePhys || !postPhys) return;
+
+    G4LogicalVolume *preVolume = prePhys->GetLogicalVolume();
+    G4LogicalVolume *postVolume = postPhys->GetLogicalVolume();
+    G4int trackID = track->GetTrackID();
+
+    // ----------------------------------------------------------------
+    // Target Exit Directional Culling (Universal)
+    // ----------------------------------------------------------------
+    if (preVolume == pOuterTarget && postVolume == pWorld) {
+        G4ThreeVector momentumDir = track->GetMomentumDirection();
+        G4ThreeVector detAxis(1.0, 0.0, 0.0);
+        
+        if (momentumDir.angle(detAxis) > 45.0 * deg) {
+            track->SetTrackStatus(fStopAndKill);
+            return;
+        }
+    }
+
+    // ----------------------------------------------------------------
+    // 2. Incident Particle Boundary Detection
+    // ----------------------------------------------------------------
+    G4bool preInDetector = false;
+    G4bool postInDetector = false;
+
+    auto preTouchable = preStepPoint->GetTouchable();
+    for (G4int i = 0; i <= preTouchable->GetHistoryDepth(); ++i) {
+        if (preTouchable->GetVolume(i)->GetLogicalVolume() == pDetectorAssembly) {
+            preInDetector = true; break;
+        }
+    }
+
+    auto postTouchable = postStepPoint->GetTouchable();
+    for (G4int i = 0; i <= postTouchable->GetHistoryDepth(); ++i) {
+        if (postTouchable->GetVolume(i)->GetLogicalVolume() == pDetectorAssembly) {
+            postInDetector = true; break;
+        }
+    }
+
+    if (postInDetector && !preInDetector) {
+        if (!ueventaction->HasIncidentMap(trackID)) {
+            G4String procName = track->GetCreatorProcess() ? track->GetCreatorProcess()->GetProcessName() : "Primary";
+            ueventaction->AddIncidentParticle(
+                trackID, track->GetDefinition()->GetPDGEncoding(), procName, 
+                track->GetKineticEnergy() / MeV, track->GetGlobalTime() / ns
+            );
+        }
+    }
+
+    // ----------------------------------------------------------------
+    // 3. Secondary Inheritance Mapping (At Birth)
+    // ----------------------------------------------------------------
+    if (ueventaction->HasIncidentMap(trackID)) {
+        const std::vector<const G4Track*>* secondaries = uStep->GetSecondaryInCurrentStep();
+        if (secondaries) {
+            for (auto sec : *secondaries) {
+                ueventaction->LinkSecondary(trackID, sec->GetTrackID());
+            }
+        }
+    }
+
+    // ----------------------------------------------------------------
+    // 4. Energy Scoring
+    // ----------------------------------------------------------------
+    G4double edep = uStep->GetTotalEnergyDeposit() / MeV;
+    if (edep > 0) {
+        static const G4LogicalVolume* lCeBr3_ptr = G4LogicalVolumeStore::GetInstance()->GetVolume("lCeBr3", false);
+        static const G4LogicalVolume* lBGO_ptr = G4LogicalVolumeStore::GetInstance()->GetVolume("lBGO", false);
+
+        G4double hitTime = track->GetGlobalTime() / ns; // Get the time of the hit
+
+        if (preVolume == lCeBr3_ptr) {
+            ueventaction->AddEnergy(trackID, preStepPoint->GetTouchable()->GetCopyNumber(), edep, true, hitTime);
+        } 
+        else if (preVolume == lBGO_ptr) {
+            ueventaction->AddEnergy(trackID, preStepPoint->GetTouchable()->GetCopyNumber(), edep, false, hitTime);
+        }
+    }
+}
+end of File: ./SimulationOfSetupStep2/sources/stepaction.cpp
 

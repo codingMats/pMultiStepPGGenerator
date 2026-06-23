@@ -41,11 +41,30 @@ generator::generator(G4String materialName): G4VUserPrimaryGeneratorAction() {
             analysisReader->SetNtupleDColumn("time_ns", time_ns);
             
             while (analysisReader->GetNtupleRow(ntupleId)) {
+                G4ThreeVector pos(pos_x_cm * cm, pos_y_cm * cm, pos_z_cm * cm);
+                G4ThreeVector mom(mom_dir_x, mom_dir_y, mom_dir_z);
+
+                // ---------------------------------------------------------
+                // PHASE SPACE FOLDING LOGIC (36 Degree Window)
+                // ---------------------------------------------------------
+                G4double phi = pos.phi(); 
+                G4double window = 36.0 * deg;
+                
+                // Find the sector (0 to 9) and calculate the necessary rotation 
+                // to fold it into Sector 0 (facing +X)
+                G4double sector = std::round(phi / window);
+                G4double rotAngle = -sector * window;
+
+                // Apply rotation to both position and momentum
+                pos.rotateZ(rotAngle);
+                mom.rotateZ(rotAngle);
+                // ---------------------------------------------------------
+
                 PhaseSpaceParticle p;
                 p.pdg = pdg;
                 p.energy = energy_MeV;
-                p.position = G4ThreeVector(pos_x_cm * cm, pos_y_cm * cm, pos_z_cm * cm);
-                p.direction = G4ThreeVector(mom_dir_x, mom_dir_y, mom_dir_z);
+                p.position = pos;
+                p.direction = mom;
                 p.time = time_ns;
                 sharedPhaseSpaceData->push_back(p);
             }
