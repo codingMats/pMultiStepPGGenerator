@@ -170,6 +170,97 @@ namespace SharedMaterials {
 
         G4Material* sb3 = new G4Material("SB3_cortical_bone", 1.823*g/cm3, 6);
         sb3->AddElement(elH, 0.03410); sb3->AddElement(elC, 0.31410); sb3->AddElement(elN, 0.01840); sb3->AddElement(elO, 0.36500); sb3->AddElement(elCl, 0.00040); sb3->AddElement(elCa, 0.26810);
+        
+        // new calibration materials
+        //         Mixing AP6_adipose and BRN_SR2_brain with weight fractions 50.00% and 50.00% respectively.
+        // --- Mix for Gammex_Cal_000 ---
+        // Target Ca achieved: 0.00000
+        // Density: 0.996 g/cm3
+        G4Material* Gammex_Cal_000 = new G4Material("Gammex_Cal_000", 0.996*g/cm3, 5);
+        Gammex_Cal_000->AddElement(elN, 0.01970);
+        Gammex_Cal_000->AddElement(elCl, 0.00105);
+        Gammex_Cal_000->AddElement(elO, 0.15565);
+        Gammex_Cal_000->AddElement(elH, 0.09945);
+        Gammex_Cal_000->AddElement(elC, 0.72415);
+
+        // Mixing CB2_30_CaCO3 with 0.6270736270422386 % and CT_solid_water with 0.37292637295776143% to achieve target Ca density 0.10000 g/cm3.
+        // Mixing CB2_30_CaCO3 and CT_solid_water with weight fractions 62.71% and 37.29% respectively.
+        // --- Mix for Gammex_Cal_010 ---
+        // Target Ca achieved: 0.08393
+        // Density: 1.192 g/cm3
+        G4Material* Gammex_Cal_010 = new G4Material("Gammex_Cal_010", 1.192*g/cm3, 6);
+        Gammex_Cal_010->AddElement(elN, 0.02221);
+        Gammex_Cal_010->AddElement(elCa, 0.08393);
+        Gammex_Cal_010->AddElement(elCl, 0.00121);
+        Gammex_Cal_010->AddElement(elO, 0.23469);
+        Gammex_Cal_010->AddElement(elH, 0.07172);
+        Gammex_Cal_010->AddElement(elC, 0.58624);
+
+        // Mixing CB2_50_CaCO3 with 0.3885837105176085 % and B200_bone_mineral with 0.6114162894823916% to achieve target Ca density 0.17000 g/cm3.
+        // Mixing CB2_50_CaCO3 and B200_bone_mineral with weight fractions 38.86% and 61.14% respectively.
+        // --- Mix for Gammex_Cal_017 ---
+        // Target Ca achieved: 0.13203
+        // Density: 1.288 g/cm3
+        G4Material* Gammex_Cal_017 = new G4Material("Gammex_Cal_017", 1.288*g/cm3, 7);
+        Gammex_Cal_017->AddElement(elN, 0.01801);
+        Gammex_Cal_017->AddElement(elCa, 0.13203);
+        Gammex_Cal_017->AddElement(elCl, 0.00098);
+        Gammex_Cal_017->AddElement(elP, 0.01981);
+        Gammex_Cal_017->AddElement(elO, 0.26885);
+        Gammex_Cal_017->AddElement(elH, 0.05919);
+        Gammex_Cal_017->AddElement(elC, 0.50113);
+
+        // Mixing SB3_cortical_bone with 0.6022060427169597 % and Solid_water_M457 with 0.39779395728304034% to achieve target Ca density 0.24000 g/cm3.
+        // Mixing SB3_cortical_bone and Solid_water_M457 with weight fractions 60.22% and 39.78% respectively.
+        // --- Mix for Gammex_Cal_024 ---
+        // Target Ca achieved: 0.17064
+        // Density: 1.406 g/cm3
+        G4Material* Gammex_Cal_024 = new G4Material("Gammex_Cal_024", 1.406*g/cm3, 6);
+        Gammex_Cal_024->AddElement(elN, 0.02067);
+        Gammex_Cal_024->AddElement(elCa, 0.17062);
+        Gammex_Cal_024->AddElement(elCl, 0.00080);
+        Gammex_Cal_024->AddElement(elO, 0.29898);
+        Gammex_Cal_024->AddElement(elH, 0.05243);
+        Gammex_Cal_024->AddElement(elC, 0.45650);
+
+        // Mixing SB3_cortical_bone with 0.7696969864155073 % and AP6_adipose with 0.23030301358449268% to achieve target Ca density 0.31000 g/cm3.
+        // Mixing SB3_cortical_bone and AP6_adipose with weight fractions 76.97% and 23.03% respectively.
+        // --- Mix for Gammex_Cal_031 ---
+        // Target Ca achieved: 0.20636
+        // Density: 1.502 g/cm3
+        G4Material* Gammex_Cal_031 = new G4Material("Gammex_Cal_031", 1.502*g/cm3, 6);
+        Gammex_Cal_031->AddElement(elN, 0.01934);
+        Gammex_Cal_031->AddElement(elCa, 0.20634);
+        Gammex_Cal_031->AddElement(elCl, 0.00061);
+        Gammex_Cal_031->AddElement(elO, 0.31839);
+        Gammex_Cal_031->AddElement(elH, 0.04711);
+        Gammex_Cal_031->AddElement(elC, 0.40822);
+
+        // Mixing SB3_cortical_bone with 0.4210874104419222 % and CB2_50_CaCO3 with 0.5789125895580778% to achieve target Ca density 0.38000 g/cm3.
+        // Mixing SB3_cortical_bone and CB2_50_CaCO3 with weight fractions 42.11% and 57.89% respectively.
+        // --- Mix for Gammex_Cal_038 ---
+        // Target Ca achieved: 0.22879
+        // Density: 1.661 g/cm3
+        G4Material* Gammex_Cal_038 = new G4Material("Gammex_Cal_038", 1.661*g/cm3, 6);
+        Gammex_Cal_038->AddElement(elN, 0.01655);
+        Gammex_Cal_038->AddElement(elCa, 0.22878);
+        Gammex_Cal_038->AddElement(elCl, 0.00063);
+        Gammex_Cal_038->AddElement(elO, 0.33888);
+        Gammex_Cal_038->AddElement(elH, 0.04197);
+        Gammex_Cal_038->AddElement(elC, 0.37319);
+
+        // Mixing SB3_cortical_bone with 0.9504306816722121 % and Solid_water_M457 with 0.04956931832778788% to achieve target Ca density 0.45000 g/cm3.
+        // Mixing SB3_cortical_bone and Solid_water_M457 with weight fractions 95.04% and 4.96% respectively.
+        // --- Mix for Gammex_Cal_045 ---
+        // Target Ca achieved: 0.25596
+        // Density: 1.758 g/cm3
+        G4Material* Gammex_Cal_045 = new G4Material("Gammex_Cal_045", 1.758*g/cm3, 6);
+        Gammex_Cal_045->AddElement(elN, 0.01868);
+        Gammex_Cal_045->AddElement(elCa, 0.25593);
+        Gammex_Cal_045->AddElement(elCl, 0.00045);
+        Gammex_Cal_045->AddElement(elO, 0.35674);
+        Gammex_Cal_045->AddElement(elH, 0.03638);
+        Gammex_Cal_045->AddElement(elC, 0.33182);
     }
 
     inline G4Material* GetTargetMaterial(const G4String& matName) {
